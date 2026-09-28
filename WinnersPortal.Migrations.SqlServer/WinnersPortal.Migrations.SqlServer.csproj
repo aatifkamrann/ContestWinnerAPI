@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The SQL Server migration tree, in an assembly of its own so the
+       scaffolder keeps its snapshot apart from the Postgres one (it finds
+       a snapshot by file name within the project it is pointed at, so two
+       trees in one project would overwrite each other's). The context
+       lives in Infrastructure; this project only carries what SQL Server
+       runs on first start. dotnet-ef runs against this project with the
+       API as the startup project and DATABASE__PROVIDER=sqlserver (see
+       the README). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WinnersPortal.Migrations.SqlServer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinnersPortal.Infrastructure\WinnersPortal.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

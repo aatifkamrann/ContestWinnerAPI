@@ -1,0 +1,6 @@
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Application\obj\Debug\net8.0\WinnersPortal.Application.csproj.AssemblyReference.cache
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Application\obj\Debug\net8.0\WinnersPortal.Application.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Application\obj\Debug\net8.0\WinnersPortal.Application.AssemblyInfoInputs.cache
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Application\obj\Debug\net8.0\WinnersPortal.Application.AssemblyInfo.cs
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Application\obj\Debug\net8.0\WinnersPortal.Application.csproj.CoreCompileInputs.cache
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Application\obj\Debug\net8.0\WinnersPortal.Application.sourcelink.json

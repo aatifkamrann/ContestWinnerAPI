@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The entities and enumerations, and nothing else: no web, no EF, no
+       provider. Every other tier references this one; this one references
+       nobody. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WinnersPortal.Domain</RootNamespace>
+  </PropertyGroup>
+
+</Project>

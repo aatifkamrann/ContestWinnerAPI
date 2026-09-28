@@ -1,0 +1,15 @@
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\bin\Release\net8.0\WinnersPortal.Domain.deps.json
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\bin\Release\net8.0\WinnersPortal.Domain.dll
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\bin\Release\net8.0\WinnersPortal.Domain.pdb
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.AssemblyInfoInputs.cache
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.AssemblyInfo.cs
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.csproj.CoreCompileInputs.cache
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.sourcelink.json
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.dll
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\refint\WinnersPortal.Domain.dll
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\WinnersPortal.Domain.pdb
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Domain\obj\Release\net8.0\ref\WinnersPortal.Domain.dll
+C:\Users\techmenders\AppData\Local\Temp\wp-warncheck\WinnersPortal.Domain.deps.json
+C:\Users\techmenders\AppData\Local\Temp\wp-warncheck\WinnersPortal.Domain.dll
+C:\Users\techmenders\AppData\Local\Temp\wp-warncheck\WinnersPortal.Domain.pdb

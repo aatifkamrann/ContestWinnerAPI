@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Persistence: the EF Core context, its two migration trees (one per
+       provider), and the counter recomputes that are pure SQL. References
+       the domain and both providers, and nothing above itself. dotnet-ef
+       runs against this project with the API as the startup project (see
+       the README). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WinnersPortal.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.8" />
+    <!-- The current SqlClient rather than the older one the provider
+         brings: it encrypts by default, which the documented connection
+         strings (TrustServerCertificate=True) assume. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.1" />
+    <!-- The day-to-day reads on SQL Server are stored procedures called
+         through Dapper on the context's own connection (see Sql.cs). -->
+    <PackageReference Include="Dapper" Version="2.1.86" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The procedures' scripts, one CREATE OR ALTER each, installed at
+         every start on SQL Server (see StoredProcedures.cs). -->
+    <EmbeddedResource Include="Data\Procedures\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinnersPortal.Domain\WinnersPortal.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

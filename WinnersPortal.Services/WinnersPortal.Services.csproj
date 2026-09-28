@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The business tier (Services, because an Application namespace would
+       shadow the Application entity inside it): rules, services, readers, the background workers,
+       and the integrations (GitHub, object storage, email, SMS, the AI
+       provider) that those services drive. References the domain and the
+       persistence tier; knows nothing of HTTP, controllers or hubs, which
+       is what the packages below are chosen to keep true. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WinnersPortal.Services</RootNamespace>
+  </PropertyGroup>
+
+  <!-- The usings a web project has implicitly; the services read the same
+       logging, configuration, hosting and DI abstractions. -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="System.Net.Http.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinnersPortal.Api" />
+    <InternalsVisibleTo Include="WinnersPortal.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Net.Http.WebPush" Version="3.3.1" />
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Abstractions" Version="8.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="8.0.11" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="7.7.1" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinnersPortal.Domain\WinnersPortal.Domain.csproj" />
+    <ProjectReference Include="..\WinnersPortal.Infrastructure\WinnersPortal.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
