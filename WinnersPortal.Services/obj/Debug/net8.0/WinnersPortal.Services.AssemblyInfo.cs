@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WinnersPortal.Services")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1253f43d08e856c5ae91f5bd3e7073039f650d3c")]
 [assembly: System.Reflection.AssemblyProductAttribute("WinnersPortal.Services")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WinnersPortal.Services")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

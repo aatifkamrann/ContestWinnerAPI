@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "CUTZXQcTxKo=",
+  "dgSpecHash": "2STYS6WohK8=",
   "success": true,
-  "projectFilePath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Api\\WinnersPortal.Api.csproj",
+  "projectFilePath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Api\\WinnersPortal.Api.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\techmenders\\.nuget\\packages\\azure.core\\1.47.1\\azure.core.1.47.1.nupkg.sha512",
     "C:\\Users\\techmenders\\.nuget\\packages\\azure.identity\\1.14.2\\azure.identity.1.14.2.nupkg.sha512",

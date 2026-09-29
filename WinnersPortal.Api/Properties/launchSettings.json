@@ -2,11 +2,34 @@
   "profiles": {
     "WinnersPortal.Api": {
       "commandName": "Project",
-      "launchBrowser": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:8080",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ConnectionStrings__Db": "Server=SOFTWARE-ANWAR;Database=FreelanceContest;User Id=freelancecontest;Password=Wp-Dev-2025!;TrustServerCertificate=True",
+        "DP_KEYS_DIR": "C:/wp-dev-keys",
+        "WP_EMAIL_SMTPHOST": "localhost",
+        "WP_EMAIL_SMTPPORT": "1025",
+        "WP_STORAGE_ENDPOINT": "http://localhost:9000",
+        "WP_STORAGE_PUBLICURL": "http://localhost:9000",
+        "WP_STORAGE_ACCESSKEY": "winnersportal",
+        "WP_STORAGE_SECRETKEY": "winnersportal",
+        "WP_BRANDING_PUBLICURL": "http://localhost:3000"
       },
-      "applicationUrl": "https://localhost:22631;http://localhost:22632"
+      "IIS Express": {
+        "commandName": "IISExpress",
+        "launchBrowser": true,
+        "environmentVariables": {
+          "ASPNETCORE_ENVIRONMENT": "Development"
+        }
+      }
+    },
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:6916/",
+      "sslPort": 44354
     }
   }
 }

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj": {}
+    "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj": {}
   },
   "projects": {
-    "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj": {
+    "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
+        "projectUniqueName": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
         "projectName": "WinnersPortal.Domain",
-        "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
+        "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
         "packagesPath": "C:\\Users\\techmenders\\.nuget\\packages\\",
-        "outputPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\obj\\",
+        "outputPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -70,14 +70,14 @@
         }
       }
     },
-    "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj": {
+    "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj",
+        "projectUniqueName": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj",
         "projectName": "WinnersPortal.Infrastructure",
-        "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj",
+        "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Infrastructure\\WinnersPortal.Infrastructure.csproj",
         "packagesPath": "C:\\Users\\techmenders\\.nuget\\packages\\",
-        "outputPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Infrastructure\\obj\\",
+        "outputPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Infrastructure\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -99,8 +99,8 @@
           "net8.0": {
             "targetAlias": "net8.0",
             "projectReferences": {
-              "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj": {
-                "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj"
+              "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj": {
+                "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj"
               }
             }
           }

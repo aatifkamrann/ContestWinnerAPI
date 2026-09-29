@@ -14,11 +14,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
+      "projectUniqueName": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
       "projectName": "WinnersPortal.Domain",
-      "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
+      "projectPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\WinnersPortal.Domain.csproj",
       "packagesPath": "C:\\Users\\techmenders\\.nuget\\packages\\",
-      "outputPath": "D:\\Projects\\Astrik\\FreelanceContest\\WinnersPortal.Domain\\obj\\",
+      "outputPath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Domain\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
