@@ -24,20 +24,18 @@ public sealed class SetupService(AppDbContext db, SettingsService settings, ILog
         // would leave an account behind and the wizard unable to finish.
         foreach (var (key, value) in initialSettings ?? new Dictionary<string, string?>())
         {
-            if (SettingsService.IsLocked(key)) continue;
             var def = SettingsRegistry.Find(key)
                 ?? throw new SettingsValidationException($"Unknown setting '{key}'.");
             if (SettingsService.ValueProblem(def, value) is { } problem)
                 throw new SettingsValidationException(problem);
         }
-        // The two addresses together, as the wizard leaves them: a locked
-        // or omitted one is read as it stands.
+        // The two addresses together, as the wizard leaves them: an omitted
+        // or blank one is read as it stands.
         var given = initialSettings ?? new Dictionary<string, string?>();
+        string? Or(string? value, string? standing) => string.IsNullOrEmpty(value) ? standing : value;
         if (WebOrigin.PairProblem(
-                given.TryGetValue(WebOrigin.WebUrlKey, out var webUrl) && !SettingsService.IsLocked(WebOrigin.WebUrlKey)
-                    ? webUrl : await settings.GetAsync(WebOrigin.WebUrlKey, ct),
-                given.TryGetValue(WebOrigin.ApiUrlKey, out var apiUrl) && !SettingsService.IsLocked(WebOrigin.ApiUrlKey)
-                    ? apiUrl : await settings.GetAsync(WebOrigin.ApiUrlKey, ct)) is { } pair)
+                Or(given.GetValueOrDefault(WebOrigin.WebUrlKey), await settings.GetAsync(WebOrigin.WebUrlKey, ct)),
+                Or(given.GetValueOrDefault(WebOrigin.ApiUrlKey), await settings.GetAsync(WebOrigin.ApiUrlKey, ct))) is { } pair)
             throw new SettingsValidationException(pair);
 
         var admin = new User
@@ -55,15 +53,29 @@ public sealed class SetupService(AppDbContext db, SettingsService settings, ILog
         db.Users.Add(admin);
         await db.SaveChangesAsync(ct);
 
-        var updates = new Dictionary<string, string?>(
-            initialSettings ?? new Dictionary<string, string?>(), StringComparer.Ordinal)
+        // The wizard shows what the deployment's environment sets and sends
+        // it back. A value it only echoes is left to the environment, where
+        // it is in force while nothing is saved: saving it would freeze
+        // today's variable over tomorrow's. What the person changed is saved,
+        // and wins.
+        var updates = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (key, value) in given)
         {
-            ["system.setupCompleted"] = "true",
-        };
-        // The wizard may echo back env-locked keys; skip those rather than fail setup.
-        await settings.SetManyAsync(updates, changedBy, allowSystem: true, skipLocked: true, ct: ct);
+            if (EchoesEnvironment(SettingsService.EnvOf(key), value, await settings.SourceAsync(key, ct))) continue;
+            updates[key] = value;
+        }
+        updates["system.setupCompleted"] = "true";
+        await settings.SetManyAsync(updates, changedBy, allowSystem: true, ct: ct);
 
         log.LogInformation("Setup completed; administrator {Email} created.", admin.Email);
         return admin;
     }
+
+    /// <summary>
+    /// Whether the wizard only sends back what the deployment's environment
+    /// supplies: the same value, with nothing saved over it. Such a value is
+    /// left to the environment rather than saved.
+    /// </summary>
+    public static bool EchoesEnvironment(string? env, string? value, SettingSource source) =>
+        env is not null && string.Equals(env, value, StringComparison.Ordinal) && source == SettingSource.Environment;
 }

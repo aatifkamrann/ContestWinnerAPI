@@ -106,6 +106,10 @@ public static partial class ActivityNames
         ["POST /api/opportunities/{id}/cancel"] = "Cancelled an opportunity",
         ["POST /api/opportunities/{id}/award"] = "Announced a winner",
         ["POST /api/awards/{id}/paid"] = "Marked an award paid",
+        ["POST /api/checkpoints/{id}/approve"] = "Approved a milestone",
+        ["POST /api/checkpoints/{id}/changes"] = "Asked for changes to a milestone",
+        ["POST /api/checkpoints/{id}/paid"] = "Marked a milestone paid",
+        ["POST /api/checkpoints/{id}/resubmit"] = "Handed a milestone in again",
         ["PUT /api/awards/{id}/rating"] = "Rated the other party",
         ["POST /api/opportunities/{id}/attachments"] = "Started attaching a file to a brief",
         ["PUT /api/attachments/{id}/content"] = "Attached a file to a brief",
@@ -153,6 +157,15 @@ public static partial class ActivityNames
         ["POST /api/opportunities/{id}/ai/standing"] = "Asked AI for standing notes",
         ["POST /api/entries/{id}/ai/digest"] = "Asked AI for an entry digest",
 
+        // conversations
+        ["POST /api/chat/threads/{id}"] = "Sent a message",
+        ["PUT /api/chat/threads/{id}/read"] = "Opened a conversation",
+        ["POST /api/chat/threads/{id}/report"] = "Reported a conversation",
+        // An administrator reading one for moderation: every page of it is
+        // a row, its subject the opportunity and the two people.
+        ["GET /api/admin/conversations/{id}"] = "Read a conversation",
+        ["POST /api/admin/conversations/{id}/reports/resolve"] = "Marked a conversation's reports reviewed",
+
         // administration
         ["PUT /api/settings"] = "Changed settings",
         ["POST /api/settings/logo"] = "Uploaded the logo",
@@ -183,7 +196,8 @@ public static partial class ActivityNames
         ["POST /api/admin/awards/{id}/restart-handover"] = "Restarted a handover",
         ["POST /api/admin/deliveries/{id}/replay"] = "Replayed a webhook delivery",
         ["POST /api/admin/slow-queries/clear"] = "Cleared the slow-query tally",
-        ["POST /api/admin/database/test"] = "Tested a database to move to",
+        ["POST /api/admin/database/test"] = "Tested a database connection",
+        ["POST /api/admin/database/connection"] = "Changed the database connection",
         ["POST /api/admin/database/move"] = "Started moving the portal to another database",
     };
 

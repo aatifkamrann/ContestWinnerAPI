@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The golden-set eval: a console tool, not a test project, so
+       `dotnet test WinnersPortal.sln` builds it and never runs it — a run
+       spends money on a model, and is a person's decision. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>WinnersPortal.AiEvals</RootNamespace>
+  </PropertyGroup>
+
+  <!-- The shared framework for the portal's key ring and configuration:
+       the saved eval key is read from the portal's database and decrypted
+       with the ring beside the API, as the API itself does. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WinnersPortal.Services\WinnersPortal.Services.csproj" />
+  </ItemGroup>
+
+</Project>

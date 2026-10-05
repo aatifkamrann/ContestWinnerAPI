@@ -38,7 +38,14 @@ BEGIN
 
     SELECT a.[Id], a.[Amount], a.[Currency], a.[AnnouncedAtUtc], a.[PaidAtUtc], a.[Handover],
            a.[HandoverNote], a.[TransferTargetLogin], a.[OpportunityId],
-           c.[Slug], c.[Title], w.[DisplayName] AS [Winner]
+           c.[Slug], c.[Title], w.[DisplayName] AS [Winner],
+           c.[Kind],
+           ISNULL((SELECT SUM(pm.[Amount]) FROM [Checkpoints] pc JOIN [Milestones] pm ON pm.[Id] = pc.[MilestoneId]
+                   WHERE pc.[EntryId] = a.[EntryId] AND pc.[PaidAtUtc] IS NOT NULL), 0) AS [PaidSoFar],
+           (SELECT COUNT(*) FROM [Checkpoints] pc
+            WHERE pc.[EntryId] = a.[EntryId] AND pc.[PaidAtUtc] IS NULL AND pc.[ChangesRequestedAtUtc] IS NULL) AS [Waiting],
+           (SELECT COUNT(*) FROM [Checkpoints] pc
+            WHERE pc.[EntryId] = a.[EntryId] AND pc.[ChangesRequestedAtUtc] IS NOT NULL) AS [ChangesAsked]
     FROM [Awards] a
     JOIN [Opportunities] c ON c.[Id] = a.[OpportunityId]
     JOIN [Entries] e ON e.[Id] = a.[EntryId]

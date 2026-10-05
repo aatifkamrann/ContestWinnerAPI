@@ -270,8 +270,14 @@ public static class ApplicationRules
     /// taking somebody out is a removal, with the reason and the clone
     /// window that come with it — and a removal, like a withdrawal, is final.
     /// </summary>
+    /// <param name="kind">
+    /// Paid by milestone, selecting is hiring: the opportunity turns awarded
+    /// at once, so the one decision still open afterwards is taking the hire
+    /// back — before any work has arrived.
+    /// </param>
     public static string? DecisionProblem(
-        ApplicationStatus current, ApplicationStatus next, OpportunityStatus opportunityStatus, bool workArrived)
+        ApplicationStatus current, ApplicationStatus next, OpportunityStatus opportunityStatus, bool workArrived,
+        OpportunityKind kind = OpportunityKind.Competitive)
     {
         if (current == ApplicationStatus.Removed)
             return "This applicant was removed from the opportunity, and a removal is final.";
@@ -281,8 +287,15 @@ public static class ApplicationRules
             return next == ApplicationStatus.Selected
                 ? "This application is already selected."
                 : "This application is already turned down.";
-        if (opportunityStatus != OpportunityStatus.Open)
-            return "The opportunity is no longer open, so its applications can no longer be decided.";
+        var hireTakenBack = MilestonePay.ByMilestone(kind) && opportunityStatus == OpportunityStatus.Awarded
+            && current == ApplicationStatus.Selected && next == ApplicationStatus.NotSelected;
+        if (opportunityStatus != OpportunityStatus.Open && !hireTakenBack)
+            return MilestonePay.ByMilestone(kind) && opportunityStatus == OpportunityStatus.Awarded
+                ? "Somebody is hired on this opportunity, so its other applications can no longer be decided."
+                : "The opportunity is no longer open, so its applications can no longer be decided.";
+        if (hireTakenBack && workArrived)
+            return "They have already started work, so the hire can no longer be taken back. Talk it through with "
+                + "them in Messages; you may cancel the opportunity while no milestone is waiting on you.";
         if (current == ApplicationStatus.Selected && workArrived)
             return "They have already started work, so the selection can no longer be taken back. "
                 + "Use Remove from opportunity instead: it tells them why and leaves them a week to keep a copy.";
@@ -302,11 +315,12 @@ public static class ApplicationRules
     /// running, in review, won, lost to another entrant, or cancelled. Null
     /// for an application that is not selected — its status is the answer.
     /// </summary>
-    public static string? Outcome(ApplicationStatus status, OpportunityStatus opportunityStatus, bool won) =>
+    public static string? Outcome(ApplicationStatus status, OpportunityStatus opportunityStatus, bool won, bool hired = false) =>
         status != ApplicationStatus.Selected ? null : opportunityStatus switch
         {
             OpportunityStatus.Reviewing => "reviewing",
-            OpportunityStatus.Awarded => won ? "won" : "lost",
+            // Paid by milestone, the selection is the hire itself.
+            OpportunityStatus.Awarded => hired ? "hired" : won ? "won" : "lost",
             OpportunityStatus.Cancelled => "cancelled",
             _ => "open",
         };

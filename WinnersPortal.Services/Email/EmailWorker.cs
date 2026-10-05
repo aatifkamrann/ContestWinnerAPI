@@ -131,7 +131,7 @@ public sealed class EmailWorker(
                 + $"{(c.Entries == 1 ? "entry" : "entries")} — no winner announced yet.");
 
         var unpaid = await db.Awards.AsNoTracking()
-            .Where(a => a.PaidAtUtc == null)
+            .Where(a => a.PaidAtUtc == null && a.Opportunity!.Kind == OpportunityKind.Competitive)
             .Select(a => new
             {
                 a.Opportunity!.ClientId, a.Opportunity.Title, a.Amount, a.Currency, a.AnnouncedAtUtc,
@@ -141,6 +141,25 @@ public sealed class EmailWorker(
         foreach (var a in unpaid)
             Add(a.ClientId, $"The award on “{a.Title}” — {Emails.Money(a.Amount, a.Currency)} to {a.Winner}, "
                 + $"announced {AgoDays(now, a.AnnouncedAtUtc)} — is not marked paid. Your payment record is public.");
+
+        // Paid by milestone: milestones handed in and still waiting on the
+        // client — to approve, or approved and not yet marked paid.
+        var waitingMilestones = await db.Checkpoints.AsNoTracking()
+            .Where(cp => cp.PaidAtUtc == null && cp.ChangesRequestedAtUtc == null
+                && cp.Entry!.Status == EntryStatus.Active
+                && cp.Entry.Opportunity!.Kind == OpportunityKind.Milestones
+                && cp.Entry.Opportunity.Status == OpportunityStatus.Awarded)
+            .Select(cp => new
+            {
+                cp.Entry!.Opportunity!.ClientId, cp.Entry.Opportunity.Title, cp.Milestone!.Order, cp.Milestone.Amount,
+                cp.Entry.Opportunity.Currency, cp.ClaimedAtUtc, cp.ApprovedAtUtc,
+            })
+            .ToListAsync(ct);
+        foreach (var m in waitingMilestones)
+            Add(m.ClientId, m.ApprovedAtUtc is { } approved
+                ? $"Milestone {m.Order + 1} on “{m.Title}” was approved {AgoDays(now, approved)} and is not marked paid"
+                  + (m.Amount is { } a ? $" ({Emails.Money(a, m.Currency)})" : "") + " — the next milestone waits on it."
+                : $"Milestone {m.Order + 1} on “{m.Title}” was handed in {AgoDays(now, m.ClaimedAtUtc)} and waits on your review.");
 
         // Freelancers: deadlines inside 48 hours on entries that are not done.
         var closing = await db.Entries.AsNoTracking()
@@ -166,6 +185,7 @@ public sealed class EmailWorker(
             a => a.PaidAtUtc != null && a.Handover == HandoverStatus.Requested, ct);
         var neverStarted = await db.Awards.CountAsync(
             a => a.PaidAtUtc != null && a.Handover == HandoverStatus.NotStarted, ct);
+        var reportedChats = await db.ChatReports.Where(r => r.ResolvedAtUtc == null).Select(r => r.EntryId).Distinct().CountAsync(ct);
         var adminLines = new List<string>();
         if (failedRepos > 0)
             adminLines.Add($"{failedRepos} {(failedRepos == 1 ? "repository has" : "repositories have")} failed "
@@ -173,6 +193,9 @@ public sealed class EmailWorker(
         if (stuckHandovers > 0)
             adminLines.Add($"{stuckHandovers} paid {(stuckHandovers == 1 ? "award has" : "awards have")} an "
                 + "unverified repository handover — money has moved, code has not.");
+        if (reportedChats > 0)
+            adminLines.Add($"{reportedChats} reported {(reportedChats == 1 ? "conversation is" : "conversations are")} waiting "
+                + "to be reviewed — the members who reported them have heard nothing back yet.");
         if (neverStarted > 0)
             adminLines.Add($"{neverStarted} paid {(neverStarted == 1 ? "award has" : "awards have")} no transfer "
                 + "started at all — the winner's code is still owned by the portal.");

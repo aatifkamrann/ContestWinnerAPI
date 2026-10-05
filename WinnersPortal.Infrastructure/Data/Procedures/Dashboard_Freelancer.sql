@@ -24,7 +24,14 @@ BEGIN
     WHERE e.[FreelancerId] = @userId AND cp.[ClaimedAtUtc] >= @since;
 
     SELECT a.[Amount], a.[Currency], a.[AnnouncedAtUtc], a.[PaidAtUtc], a.[Handover], a.[TransferTargetLogin], a.[EntryId],
-           c.[Slug], c.[Title]
+           c.[Slug], c.[Title],
+           c.[Kind],
+           ISNULL((SELECT SUM(pm.[Amount]) FROM [Checkpoints] pc JOIN [Milestones] pm ON pm.[Id] = pc.[MilestoneId]
+                   WHERE pc.[EntryId] = a.[EntryId] AND pc.[PaidAtUtc] IS NOT NULL), 0) AS [PaidSoFar],
+           (SELECT COUNT(*) FROM [Checkpoints] pc
+            WHERE pc.[EntryId] = a.[EntryId] AND pc.[PaidAtUtc] IS NULL AND pc.[ChangesRequestedAtUtc] IS NULL) AS [Waiting],
+           (SELECT COUNT(*) FROM [Checkpoints] pc
+            WHERE pc.[EntryId] = a.[EntryId] AND pc.[ChangesRequestedAtUtc] IS NOT NULL) AS [ChangesAsked]
     FROM [Awards] a
     JOIN [Entries] e ON e.[Id] = a.[EntryId]
     JOIN [Opportunities] c ON c.[Id] = a.[OpportunityId]

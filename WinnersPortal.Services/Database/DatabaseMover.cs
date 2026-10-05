@@ -52,7 +52,7 @@ public sealed class DatabaseMover(
         try
         {
             // 1. The target, before anything is touched.
-            var probe = await DatabaseProbe.TestAsync(target, connectionString, current, ct);
+            var probe = await DatabaseProbe.TestAsync(target, connectionString, current, null, ProbePurpose.Move, ct);
             if (probe.Problem is not null) throw new InvalidOperationException(probe.Problem);
 
             // 2. Nothing writes from here on.
@@ -310,5 +310,5 @@ public sealed class DatabaseMover(
     }
 
     private static string Scrub(string message, string connectionString) =>
-        message.Replace(connectionString, "[connection string]", StringComparison.OrdinalIgnoreCase);
+        DatabaseConnections.Scrub(message, connectionString);
 }

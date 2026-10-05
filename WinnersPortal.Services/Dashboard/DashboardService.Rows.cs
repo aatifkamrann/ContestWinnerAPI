@@ -22,7 +22,7 @@ public sealed partial class DashboardService
 
     internal sealed record ClientAwardRow(
         Guid Id, decimal Amount, string Currency, DateTimeOffset AnnouncedAtUtc, DateTimeOffset? PaidAtUtc, HandoverStatus Handover,
-        string? HandoverNote, string? TransferTargetLogin, Guid OpportunityId, string Slug, string Title, string Winner);
+        string? HandoverNote, string? TransferTargetLogin, Guid OpportunityId, string Slug, string Title, string Winner, OpportunityKind Kind, decimal PaidSoFar, int Waiting, int ChangesAsked);
 
     internal sealed record ClientRecentRow(DateTimeOffset ClaimedAtUtc, string Via, string Who, string Milestone, int Order, string Slug);
 
@@ -78,7 +78,11 @@ public sealed partial class DashboardService
                 a.HandoverNote, a.TransferTargetLogin, a.OpportunityId,
                 a.Opportunity!.Slug,
                 a.Opportunity!.Title,
-                a.Entry!.Freelancer!.DisplayName))
+                a.Entry!.Freelancer!.DisplayName,
+                a.Opportunity!.Kind,
+                db.Checkpoints.Where(cp => cp.EntryId == a.EntryId && cp.PaidAtUtc != null).Sum(cp => (decimal?)cp.Milestone!.Amount) ?? 0,
+                db.Checkpoints.Count(cp => cp.EntryId == a.EntryId && cp.PaidAtUtc == null && cp.ChangesRequestedAtUtc == null),
+                db.Checkpoints.Count(cp => cp.EntryId == a.EntryId && cp.ChangesRequestedAtUtc != null)))
             .ToListAsync(ct);
 
         var recent = await db.Checkpoints.AsNoTracking()
@@ -112,7 +116,7 @@ public sealed partial class DashboardService
 
     internal sealed record FreelancerAwardRow(
         decimal Amount, string Currency, DateTimeOffset AnnouncedAtUtc, DateTimeOffset? PaidAtUtc, HandoverStatus Handover,
-        string? TransferTargetLogin, Guid EntryId, string Slug, string Title);
+        string? TransferTargetLogin, Guid EntryId, string Slug, string Title, OpportunityKind Kind, decimal PaidSoFar, int Waiting, int ChangesAsked);
 
     internal sealed record FreelancerRecentRow(DateTimeOffset ClaimedAtUtc, string Via, string Ref, string Milestone, int Order, string Slug);
 
@@ -153,7 +157,11 @@ public sealed partial class DashboardService
             .Select(a => new FreelancerAwardRow(
                 a.Amount, a.Currency, a.AnnouncedAtUtc, a.PaidAtUtc, a.Handover, a.TransferTargetLogin, a.EntryId,
                 a.Opportunity!.Slug,
-                a.Opportunity!.Title))
+                a.Opportunity!.Title,
+                a.Opportunity!.Kind,
+                db.Checkpoints.Where(cp => cp.EntryId == a.EntryId && cp.PaidAtUtc != null).Sum(cp => (decimal?)cp.Milestone!.Amount) ?? 0,
+                db.Checkpoints.Count(cp => cp.EntryId == a.EntryId && cp.PaidAtUtc == null && cp.ChangesRequestedAtUtc == null),
+                db.Checkpoints.Count(cp => cp.EntryId == a.EntryId && cp.ChangesRequestedAtUtc != null)))
             .ToListAsync(ct);
 
         var recent = await db.Checkpoints.AsNoTracking()
@@ -197,7 +205,7 @@ public sealed partial class DashboardService
     internal sealed record AdminAwardRow(
         decimal Amount, string Currency, DateTimeOffset AnnouncedAtUtc, DateTimeOffset? PaidAtUtc, HandoverStatus Handover,
         string? TransferTargetLogin, string? HandoverNote, string Slug, string Title, string Client, Guid ClientId,
-        string Winner, Guid WinnerId);
+        string Winner, Guid WinnerId, OpportunityKind Kind, decimal PaidSoFar, int Waiting, int ChangesAsked);
 
     internal sealed record DeliveryRow(string Event, string? HandledNote, DateTimeOffset ReceivedAtUtc, string? RepoFullName);
 
@@ -275,7 +283,11 @@ public sealed partial class DashboardService
                 a.Opportunity!.Client!.DisplayName,
                 a.Opportunity!.ClientId,
                 a.Entry!.Freelancer!.DisplayName,
-                a.Entry!.FreelancerId))
+                a.Entry!.FreelancerId,
+                a.Opportunity!.Kind,
+                db.Checkpoints.Where(cp => cp.EntryId == a.EntryId && cp.PaidAtUtc != null).Sum(cp => (decimal?)cp.Milestone!.Amount) ?? 0,
+                db.Checkpoints.Count(cp => cp.EntryId == a.EntryId && cp.PaidAtUtc == null && cp.ChangesRequestedAtUtc == null),
+                db.Checkpoints.Count(cp => cp.EntryId == a.EntryId && cp.ChangesRequestedAtUtc != null)))
             .ToListAsync(ct);
 
         var deliveries = await db.WebhookDeliveries.AsNoTracking()

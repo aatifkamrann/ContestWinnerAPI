@@ -6,8 +6,10 @@ using WinnersPortal.Services.Common;
 using WinnersPortal.Services.Opportunities;
 using WinnersPortal.Services.GitHub;
 using WinnersPortal.Services.Identity;
+using WinnersPortal.Services.Ai;
 using WinnersPortal.Services.Live;
 using WinnersPortal.Services.Preview;
+using WinnersPortal.Services.Settings;
 
 namespace WinnersPortal.Services.Admin;
 
@@ -19,11 +21,13 @@ namespace WinnersPortal.Services.Admin;
 /// (a bad username fixed, a GitHub App reinstalled, a delivery that arrived
 /// before its entry) all end with "run it again", never with hand-editing.
 /// Beside them, the slow queries the process has seen — read from memory,
-/// cleared from here, so a fix is measured from the moment it shipped.
+/// cleared from here, so a fix is measured from the moment it shipped —
+/// and what the AI features have cost, a month of day rows priced as the
+/// settings price them now.
 /// </summary>
 public sealed partial class AdminService(
     AppDbContext db, GitHubWorkSignal githubSignal, GitHubService github, ILiveBoard live, PreviewWorkSignal previewSignal,
-    ILoggerFactory logFactory, IdentityService identity, SlowQueryStats slowQueries)
+    ILoggerFactory logFactory, IdentityService identity, SlowQueryStats slowQueries, AiQuota aiQuota, AiOptions ai)
 {
     /// <summary>How many query shapes the screen shows, the costliest first.</summary>
     public const int SlowQueriesShown = 50;
@@ -66,6 +70,9 @@ public sealed partial class AdminService(
             }),
             Deliveries = deliveries,
             SlowQueries = SlowQueries(),
+            AiUsage = AiUsageReport.Build(
+                await aiQuota.SpendSinceAsync(AiUsageReport.FromDay(now), ct), now,
+                await ai.PricesAsync(ct), await ai.DailyBudgetUsdAsync(ct), await ai.DailyCallLimitAsync(ct)),
         });
     }
 
@@ -235,7 +242,20 @@ public sealed partial class AdminService(
         string note;
         string? touchedSlug = null;
         var buildQueued = false;
-        if (delivery.Source == WebhookDelivery.Identity)
+        if (delivery.Source == WebhookDelivery.Identity && delivery.DeliveryId.StartsWith("shufti:", StringComparison.Ordinal))
+        {
+            // A Shufti Pro callback: its reference names the verification,
+            // its event is the word, and its delivery id is the one the live
+            // path stamped as the verification's last event.
+            var root = json.RootElement;
+            note = await identity.HandleAsync(
+                root.GetProperty("reference").GetString()!,
+                root.GetProperty("event").GetString()!,
+                IdentityProviderRequests.DeclineReason(IdentityProviders.ShuftiPro, root),
+                delivery.DeliveryId,
+                ct);
+        }
+        else if (delivery.Source == WebhookDelivery.Identity)
         {
             // The provider's verdict, taken again down the live path; the
             // event id is what makes a verdict already applied a no-op.

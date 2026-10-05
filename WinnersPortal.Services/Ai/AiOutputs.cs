@@ -68,6 +68,65 @@ public static class AiOutputs
         }
     }
 
+    /// <summary>
+    /// The shape each feature's answer is held to on the wire — the same
+    /// contract the validator reads, said up front so the provider will not
+    /// produce anything else (OpenAI's strict <c>json_schema</c>, Gemini's
+    /// <c>responseJsonSchema</c>, Anthropic's <c>output_config</c>). One
+    /// dialect satisfies all three: every object closed
+    /// (<c>additionalProperties</c> false) with every property required, a
+    /// value the prompt allows to be missing said as null rather than left
+    /// out, closed lists as enums so a category key cannot be invented, and
+    /// none of the keywords one provider or another lacks — no lengths, no
+    /// item counts, no formats — so the caps stay the validator's. The
+    /// validator still runs on every answer: a schema holds the shape, not
+    /// the sense, and a provider's promise is not the portal's gate.
+    /// </summary>
+    public static object Schema(AiFeature feature)
+    {
+        var categoryKeys = Opportunities.OpportunityCategories.All.Select(c => c.Key).ToArray();
+        return feature switch
+        {
+            AiFeature.MilestoneExtraction => AiSchema.Obj(
+                ("milestones", AiSchema.Arr(AiSchema.Obj(
+                    ("title", AiSchema.Str), ("description", AiSchema.StrOrNull), ("amount", AiSchema.NumOrNull))))),
+            AiFeature.BriefCoach => AiSchema.Obj(
+                ("flags", AiSchema.Arr(AiSchema.Obj(
+                    ("severity", AiSchema.Enum("info", "warn")), ("issue", AiSchema.Str), ("suggestion", AiSchema.Str))))),
+            AiFeature.EntryDigest => AiSchema.Obj(
+                ("summary", AiSchema.Str), ("stack", AiSchema.Arr(AiSchema.Str)), ("milestoneCoverage", AiSchema.Str),
+                ("quality", AiSchema.Str), ("reviewFocus", AiSchema.Arr(AiSchema.Str))),
+            AiFeature.ProgressNarrative => AiSchema.Obj(("narrative", AiSchema.Str)),
+            AiFeature.SeoMetadata => AiSchema.Obj(("title", AiSchema.Str), ("description", AiSchema.Str)),
+            AiFeature.StandingNotes => AiSchema.Obj(
+                ("summary", AiSchema.Str),
+                ("entrants", AiSchema.Arr(AiSchema.Obj(
+                    ("entryId", AiSchema.Str), ("note", AiSchema.Str), ("check", AiSchema.Arr(AiSchema.Str)))))),
+            AiFeature.CategorySuggestion => AiSchema.Obj(
+                ("category", AiSchema.Enum(categoryKeys)), ("subcategory", AiSchema.StrOrNull),
+                ("because", AiSchema.Str), ("confident", AiSchema.Bool)),
+            AiFeature.RecommendedMatching => AiSchema.Obj(("categories", AiSchema.Arr(AiSchema.Enum(categoryKeys)))),
+            AiFeature.ProfileSummary => AiSchema.Obj(("summary", AiSchema.Str)),
+            AiFeature.ProfileReview => AiSchema.Obj(
+                ("strongFor", AiSchema.Str),
+                ("improvements", AiSchema.Arr(AiSchema.Obj(("id", AiSchema.Str), ("text", AiSchema.Str))))),
+            AiFeature.ProjectApproach => AiSchema.Obj(("approach", AiSchema.Str)),
+            AiFeature.ApplicationEvaluation => AiSchema.Obj(
+                ("strengths", AiSchema.Arr(AiSchema.Obj(("id", AiSchema.Str), ("text", AiSchema.Str)))),
+                ("risks", AiSchema.Arr(AiSchema.Obj(("id", AiSchema.Str), ("text", AiSchema.Str)))),
+                ("note", AiSchema.Str)),
+            AiFeature.RequirementsSuggestion => AiSchema.Obj(
+                ("requirements", AiSchema.Arr(AiSchema.Obj(("title", AiSchema.Str), ("detail", AiSchema.Str))))),
+            AiFeature.CriteriaSuggestion => AiSchema.Obj(
+                ("criteria", AiSchema.Arr(AiSchema.Obj(
+                    ("title", AiSchema.Str), ("points", AiSchema.Int), ("description", AiSchema.Str))))),
+            _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, "This feature has no provider output."),
+        };
+    }
+
+    /// <summary>The settings test's answer, <c>{"ok":true}</c>.</summary>
+    public static object PingSchema => AiSchema.Obj(("ok", AiSchema.Bool));
+
     private static string? Fail(string message, out string? error)
     {
         error = message;
@@ -84,11 +143,25 @@ public static class AiOutputs
             {
                 var title = Str(m, "title");
                 if (string.IsNullOrWhiteSpace(title)) continue;
-                items.Add(new
-                {
-                    title = AiRules.Clip(title, 200),
-                    description = NullIfEmpty(AiRules.Clip(Str(m, "description"), 300)),
-                });
+                // An amount only where the model gave a usable one — paid by
+                // milestone, with a total to split; otherwise the item reads
+                // as it always did.
+                var amount = m.TryGetProperty("amount", out var a) && a.ValueKind == JsonValueKind.Number
+                    && a.TryGetDecimal(out var d) && d > 0 && d <= Opportunities.MilestonePay.MaxAmount
+                    ? decimal.Round(d, 2)
+                    : (decimal?)null;
+                items.Add(amount is null
+                    ? new
+                    {
+                        title = AiRules.Clip(title, 200),
+                        description = NullIfEmpty(AiRules.Clip(Str(m, "description"), 300)),
+                    }
+                    : (object)new
+                    {
+                        title = AiRules.Clip(title, 200),
+                        description = NullIfEmpty(AiRules.Clip(Str(m, "description"), 300)),
+                        amount,
+                    });
                 if (items.Count == 20) break;
             }
         }
@@ -471,4 +544,36 @@ public static class AiOutputs
     }
 
     private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+}
+
+/// <summary>
+/// The few JSON Schema pieces the answer shapes are built from, in the
+/// dialect every provider's structured output accepts (see
+/// <see cref="AiOutputs.Schema"/>). Plain objects, serialised inside the
+/// request body by the same serialiser as the rest of it.
+/// </summary>
+public static class AiSchema
+{
+    public static object Str => new { type = "string" };
+
+    public static object StrOrNull => new { type = new[] { "string", "null" } };
+
+    public static object Bool => new { type = "boolean" };
+
+    public static object Int => new { type = "integer" };
+
+    public static object NumOrNull => new { type = new[] { "number", "null" } };
+
+    public static object Arr(object items) => new { type = "array", items };
+
+    public static object Enum(params string[] values) => new { type = "string", @enum = values };
+
+    /// <summary>A closed object: these properties, all required, nothing else.</summary>
+    public static object Obj(params (string Name, object Type)[] properties) => new Dictionary<string, object>
+    {
+        ["type"] = "object",
+        ["properties"] = properties.ToDictionary(p => p.Name, p => p.Type),
+        ["required"] = properties.Select(p => p.Name).ToArray(),
+        ["additionalProperties"] = false,
+    };
 }

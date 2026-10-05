@@ -102,8 +102,13 @@ public static partial class StandingReader
         List<HistoryRow> History,
         Dictionary<Guid, RatingRow> Ratings);
 
+    /// <param name="buildsOn">
+    /// Whether Docker Compose builds are on (BuildHostService): while they
+    /// are off the board shows no builds, so no standing carries a Builds
+    /// line either — the part, and its points, come back with the host.
+    /// </param>
     public static async Task<Dictionary<Guid, Row>> ForOpportunitiesAsync(
-        AppDbContext db, IReadOnlyCollection<Guid> opportunityIds, DateTimeOffset now, CancellationToken ct)
+        AppDbContext db, IReadOnlyCollection<Guid> opportunityIds, DateTimeOffset now, bool buildsOn, CancellationToken ct)
     {
         var result = new Dictionary<Guid, Row>();
         if (opportunityIds.Count == 0) return result;
@@ -151,7 +156,7 @@ public static partial class StandingReader
                         && p.YearsExperience is not null,
                     // The board wants a score, and the score does not move
                     // with this: a portal without GitHub sign-in denies the
-                    // same three points to every row. Only the profile page,
+                    // same two points to every row. Only the profile page,
                     // which tells one person what they can still reach, asks
                     // the settings and drops them from the denominator too.
                     GithubConnected: reads.GithubConnected.Contains(e.FreelancerId),
@@ -181,7 +186,7 @@ public static partial class StandingReader
                     PortfolioScore: Merit.PortfolioScore(portfolio),
                     SkillsListed: p?.Skills.Count ?? 0,
                     SkillsMatched: Standing.MatchSkills(p?.Skills ?? [], briefText),
-                    RequiresCompose: c.RequiresCompose,
+                    RequiresCompose: c.RequiresCompose && buildsOn,
                     BuildsFinished: e.Claimed.Count(cp => cp.BuildStatus is PreviewBuildStatus.Built or PreviewBuildStatus.Failed),
                     BuildsOk: e.Claimed.Count(cp => cp.BuildStatus == PreviewBuildStatus.Built));
 

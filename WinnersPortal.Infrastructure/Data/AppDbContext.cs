@@ -34,9 +34,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
     public DbSet<Submission> Submissions => Set<Submission>();
     public DbSet<EmailMessage> EmailMessages => Set<EmailMessage>();
     public DbSet<AiArtifact> AiArtifacts => Set<AiArtifact>();
+    public DbSet<AiUsage> AiUsages => Set<AiUsage>();
+    public DbSet<AiSpend> AiSpends => Set<AiSpend>();
     public DbSet<PushDevice> PushDevices => Set<PushDevice>();
     public DbSet<PushMessage> PushMessages => Set<PushMessage>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatReport> ChatReports => Set<ChatReport>();
     public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<ProfileSkill> ProfileSkills => Set<ProfileSkill>();
     public DbSet<ProfileLanguage> ProfileLanguages => Set<ProfileLanguage>();
@@ -335,6 +339,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
         b.Entity<Milestone>(e =>
         {
             e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
             e.HasOne<Opportunity>().WithMany(c => c.Milestones)
                 .HasForeignKey(x => x.OpportunityId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.OpportunityId, x.Order });
@@ -394,6 +399,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
             e.Property(x => x.BuildError).HasMaxLength(400);
             e.Property(x => x.BuildLogKey).HasMaxLength(300);
             e.Property(x => x.BuildLogSetup).HasMaxLength(16);
+            e.Property(x => x.ChangesNote).HasMaxLength(Checkpoint.MaxChangesNote);
             // The preview worker's sweep: builds waiting for the host, and
             // the ones it is waiting on.
             e.HasIndex(x => new { x.BuildStatus, x.BuildDueAtUtc });
@@ -527,10 +533,31 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
             e.HasIndex(x => new { x.Status, x.CreatedAtUtc });
         });
 
+        b.Entity<AiUsage>(e =>
+        {
+            // One row per day for the portal (Guid.Empty) and one per member
+            // who spent; the key is what makes the count a single statement.
+            e.HasKey(x => new { x.Day, x.UserId });
+            e.Property(x => x.Day).HasMaxLength(10);
+        });
+
+        b.Entity<AiSpend>(e =>
+        {
+            // One row per day per feature per model, added to in a single
+            // statement; the panel reads a month of them and sums.
+            e.HasKey(x => new { x.Day, x.Feature, x.Provider, x.Model });
+            e.Property(x => x.Day).HasMaxLength(10);
+            e.Property(x => x.Feature).HasMaxLength(40);
+            e.Property(x => x.Provider).HasMaxLength(20);
+            e.Property(x => x.Model).HasMaxLength(80);
+        });
+
         b.Entity<IdentityVerification>(e =>
         {
             e.Property(x => x.Provider).HasMaxLength(20);
             e.Property(x => x.SessionId).HasMaxLength(64);
+            e.Property(x => x.SessionUrl).HasMaxLength(2000);
+            e.Property(x => x.ReturnPath).HasMaxLength(512);
             e.Property(x => x.LastEventId).HasMaxLength(64);
             e.Property(x => x.Note).HasMaxLength(400);
             e.Property(x => x.ProofError).HasMaxLength(400);
@@ -615,6 +642,44 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
             // The bell's page, newest first, and its unread count.
             e.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
             e.HasIndex(x => new { x.UserId, x.ReadAtUtc });
+        });
+
+        b.Entity<ChatMessage>(e =>
+        {
+            e.Property(x => x.Body).HasMaxLength(ChatMessage.MaxBodyLength);
+            // The conversation is the entry's: an entry that goes takes its
+            // messages with it. The sender's account is never deleted from
+            // under a message — erasure blanks the account and keeps the row.
+            e.HasOne(x => x.Entry).WithMany()
+                .HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Sender).WithMany()
+                .HasForeignKey(x => x.SenderId).OnDelete(DeleteBehavior.Restrict);
+            // A conversation's page, newest first, and the last line of each.
+            e.HasIndex(x => new { x.EntryId, x.CreatedAtUtc });
+            // What the other side has not read yet: the badge, per thread and in all.
+            e.HasIndex(x => new { x.EntryId, x.SenderId, x.ReadAtUtc });
+        });
+
+        b.Entity<ChatReport>(e =>
+        {
+            e.Property(x => x.Reason).HasMaxLength(ChatReport.MaxReasonLength);
+            e.Property(x => x.Details).HasMaxLength(ChatReport.MaxDetailsLength);
+            e.Property(x => x.Resolution).HasMaxLength(ChatReport.MaxResolutionLength);
+            // A report is about the entry's conversation and goes with it.
+            // The reporter's key refuses a deletion, as a sender's does:
+            // erasure deletes the person's own reports first. The reviewer's
+            // nulls — on SQL Server by the portal at the removal site, which
+            // a second cascade path through the entry would refuse to the
+            // database (as Profile.DeletedByUserId).
+            e.HasOne(x => x.Entry).WithMany()
+                .HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Reporter).WithMany()
+                .HasForeignKey(x => x.ReporterId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.ResolvedBy).WithMany()
+                .HasForeignKey(x => x.ResolvedById).OnDelete(sql ? DeleteBehavior.ClientSetNull : DeleteBehavior.SetNull);
+            // A conversation's reports, open first; the open ones portal-wide.
+            e.HasIndex(x => new { x.EntryId, x.ResolvedAtUtc });
+            e.HasIndex(x => x.ResolvedAtUtc);
         });
     }
 }

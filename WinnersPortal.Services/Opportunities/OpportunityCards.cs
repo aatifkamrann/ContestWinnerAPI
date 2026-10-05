@@ -34,6 +34,7 @@ public static partial class OpportunityCards
         public DateTimeOffset? PublishedAtUtc { get; set; }
         public OpportunityStatus Status { get; set; }
         public OpportunityDelivery Delivery { get; set; }
+        public OpportunityKind Kind { get; set; }
         public bool RequiresCompose { get; set; }
         public Guid ClientId { get; set; }
         public string ClientName { get; set; } = "";
@@ -72,6 +73,7 @@ public static partial class OpportunityCards
         PublishedAtUtc = c.PublishedAtUtc,
         Status = c.Status,
         Delivery = c.Delivery,
+        Kind = c.Kind,
         RequiresCompose = c.RequiresCompose,
         ClientId = c.ClientId,
         ClientName = c.Client!.DisplayName,
@@ -222,6 +224,7 @@ public static partial class OpportunityCards
         // entrant with no GitHub account needs to know before opening a
         // brief they cannot enter.
         Delivery = Delivery.Name(c.Delivery),
+        Kind = MilestonePay.KindName(c.Kind),
         RequiresCompose = c.RequiresCompose,
         ClientName = c.ClientName,
         ClientAvatarUrl = Profiles.AvatarRules.Url(c.ClientId, c.ClientAvatarAt),

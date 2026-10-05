@@ -129,9 +129,15 @@ namespace WinnersPortal.Migrations.SqlServer
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<int?>("InputTokens")
+                        .HasColumnType("int");
+
                     b.Property<string>("Model")
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAtUtc")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Note")
                         .HasMaxLength(400)
@@ -139,6 +145,12 @@ namespace WinnersPortal.Migrations.SqlServer
 
                     b.Property<string>("OutputJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("OutputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PromptVersion")
+                        .HasColumnType("int");
 
                     b.Property<string>("Provider")
                         .HasMaxLength(20)
@@ -158,6 +170,61 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.HasIndex("Status", "CreatedAtUtc");
 
                     b.ToTable("AiArtifacts");
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.AiSpend", b =>
+                {
+                    b.Property<string>("Day")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Feature")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<int>("Calls")
+                        .HasColumnType("int");
+
+                    b.Property<long>("InputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Day", "Feature", "Provider", "Model");
+
+                    b.ToTable("AiSpends");
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.AiUsage", b =>
+                {
+                    b.Property<string>("Day")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Calls")
+                        .HasColumnType("int");
+
+                    b.Property<long>("InputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Day", "UserId");
+
+                    b.ToTable("AiUsages");
                 });
 
             modelBuilder.Entity("WinnersPortal.Domain.Application", b =>
@@ -339,11 +406,95 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.ToTable("Awards");
                 });
 
+            modelBuilder.Entity("WinnersPortal.Domain.ChatMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("EntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ReadAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("SenderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderId");
+
+                    b.HasIndex("EntryId", "CreatedAtUtc");
+
+                    b.HasIndex("EntryId", "SenderId", "ReadAtUtc");
+
+                    b.ToTable("ChatMessages");
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.ChatReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("EntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("ReporterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Resolution")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("ResolvedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReporterId");
+
+                    b.HasIndex("ResolvedAtUtc");
+
+                    b.HasIndex("ResolvedById");
+
+                    b.HasIndex("EntryId", "ResolvedAtUtc");
+
+                    b.ToTable("ChatReports");
+                });
+
             modelBuilder.Entity("WinnersPortal.Domain.Checkpoint", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<int>("BuildAttempts")
                         .HasColumnType("int");
@@ -375,6 +526,13 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.Property<int>("BuildStatus")
                         .HasColumnType("int");
 
+                    b.Property<string>("ChangesNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ChangesRequestedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset>("ClaimedAtUtc")
                         .HasColumnType("datetimeoffset");
 
@@ -387,6 +545,9 @@ namespace WinnersPortal.Migrations.SqlServer
 
                     b.Property<Guid>("MilestoneId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("PaidAtUtc")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Ref")
                         .IsRequired()
@@ -715,10 +876,18 @@ namespace WinnersPortal.Migrations.SqlServer
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("ReturnPath")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
                     b.Property<string>("SessionId")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SessionUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -765,6 +934,10 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Amount")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
@@ -882,6 +1055,9 @@ namespace WinnersPortal.Migrations.SqlServer
 
                     b.Property<DateTimeOffset?>("EntryCloseUtc")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
 
                     b.Property<string>("MetaDescription")
                         .HasMaxLength(200)
@@ -1943,6 +2119,50 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.Navigation("Entry");
 
                     b.Navigation("Opportunity");
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.ChatMessage", b =>
+                {
+                    b.HasOne("WinnersPortal.Domain.Entry", "Entry")
+                        .WithMany()
+                        .HasForeignKey("EntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("WinnersPortal.Domain.User", "Sender")
+                        .WithMany()
+                        .HasForeignKey("SenderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Entry");
+
+                    b.Navigation("Sender");
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.ChatReport", b =>
+                {
+                    b.HasOne("WinnersPortal.Domain.Entry", "Entry")
+                        .WithMany()
+                        .HasForeignKey("EntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("WinnersPortal.Domain.User", "Reporter")
+                        .WithMany()
+                        .HasForeignKey("ReporterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("WinnersPortal.Domain.User", "ResolvedBy")
+                        .WithMany()
+                        .HasForeignKey("ResolvedById");
+
+                    b.Navigation("Entry");
+
+                    b.Navigation("Reporter");
+
+                    b.Navigation("ResolvedBy");
                 });
 
             modelBuilder.Entity("WinnersPortal.Domain.Checkpoint", b =>

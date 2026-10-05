@@ -116,13 +116,15 @@ public sealed class SetupTestLog(AppDbContext db, SettingsService settings, IDat
     /// text. Its name and whether it is active are not in it: neither changes
     /// what the test proved. Unset and empty are the same value — and a field
     /// the kind gained later is not in it at all while it is blank or at its
-    /// default, which is the value every setup tested before it had.
+    /// default, which is the value every setup tested before it had; one the
+    /// test says nothing about (a standby mark) is never in it.
     /// </summary>
     public static string Fingerprint(SetupKind kind, SetupValues setup)
     {
         var text = new StringBuilder();
         foreach (var field in kind.Fields)
         {
+            if (kind.Unproved?.Contains(field) == true) continue;
             var value = setup.Get(field) ?? "";
             if (kind.Later?.Contains(field) == true
                 && (value.Length == 0 || value == SettingsRegistry.Find(field)?.Default)) continue;

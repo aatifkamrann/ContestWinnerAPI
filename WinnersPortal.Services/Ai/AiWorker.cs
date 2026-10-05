@@ -21,15 +21,17 @@ public sealed class AiWorkSignal(WorkRelay? relay = null) : WorkSignal("ai", rel
 /// artifact rows; this worker builds each job's input, hashes it (an
 /// unchanged re-run costs nothing), checks the gate and the daily ceiling
 /// (reached means skipped, never queued), calls the provider, validates the
-/// answer, and stores the draft. The spam scan is the exception that proves
-/// the shape: same pipeline, no provider, no quota.
+/// answer, and stores the draft. A failure worth another go waits a minute,
+/// then five (NextAttemptAtUtc) and gives up after three; one that is not
+/// — a refusal, a 4xx, a wrong shape — fails at once. The spam scan is the
+/// exception that proves the shape: same pipeline, no provider, no quota.
 /// </summary>
 public sealed class AiWorker(
     IServiceScopeFactory scopes,
     SettingsService settings,
     AiOptions ai,
     AiQuota quota,
-    AiProviderClient providerClient,
+    AiCaller caller,
     GitHubService github,
     AiWorkSignal signal,
     ILiveBoard live,
@@ -123,6 +125,7 @@ public sealed class AiWorker(
         {
             artifact.Status = AiArtifactStatus.Pending;
             artifact.Attempts = 0;
+            artifact.NextAttemptAtUtc = null;
             artifact.Note = null;
         }
     }
@@ -131,8 +134,9 @@ public sealed class AiWorker(
 
     private async Task ProcessPendingAsync(AppDbContext db, DateTimeOffset now, CancellationToken ct)
     {
+        // A job waiting out a provider's bad minute is left until its time.
         var pending = await db.AiArtifacts
-            .Where(a => a.Status == AiArtifactStatus.Pending)
+            .Where(a => a.Status == AiArtifactStatus.Pending && (a.NextAttemptAtUtc == null || a.NextAttemptAtUtc <= now))
             .OrderBy(a => a.CreatedAtUtc)
             .Take(BatchSize)
             .ToListAsync(ct);
@@ -157,11 +161,21 @@ public sealed class AiWorker(
             {
                 artifact.Attempts++;
                 artifact.Note = AiRules.FailureNote(e);
-                if (artifact.Attempts >= AiRules.MaxAttempts)
+                // Only a failure the next attempt may not meet earns one — a
+                // refusal, a 4xx or a wrong shape would be the same an hour
+                // from now, so the remaining attempts are not spent on it.
+                if (!AiRules.Retryable(e) || artifact.Attempts >= AiRules.MaxAttempts)
                 {
                     artifact.Status = AiArtifactStatus.Failed;
-                    log.LogWarning(e, "AI job {Feature}/{Subject} failed for good.",
-                        artifact.Feature, artifact.SubjectId);
+                    artifact.NextAttemptAtUtc = null;
+                    log.LogWarning(e, "AI job {Feature}/{Subject} failed for good after {Attempts} attempt(s).",
+                        artifact.Feature, artifact.SubjectId, artifact.Attempts);
+                }
+                else
+                {
+                    artifact.NextAttemptAtUtc = now + AiRules.Backoff(artifact.Attempts);
+                    log.LogInformation(e, "AI job {Feature}/{Subject} will be tried again at {At}.",
+                        artifact.Feature, artifact.SubjectId, artifact.NextAttemptAtUtc);
                 }
             }
             await db.SaveChangesAsync(ct);
@@ -189,60 +203,93 @@ public sealed class AiWorker(
         if (artifact.Feature == AiFeature.SpamFilter)
         {
             var (input, output) = await RunSpamScanAsync(db, artifact.SubjectId, ct);
-            var localHash = AiRules.InputHash(input);
+            var localHash = AiRules.InputHash(AiFeature.SpamFilter, input);
             if (localHash == artifact.InputHash && artifact.OutputJson is not null)
             {
                 Restore(artifact);
                 return;
             }
-            Complete(artifact, localHash, output, "local", null, now);
+            Complete(artifact, localHash, output, "local", null, null, now, null);
             return;
         }
 
         // ---- provider features: input → hash → ceiling → call → validate ----
-        var (prompt, canonicalInput) = artifact.Feature switch
+        var (prompt, canonicalInput, aliases) = artifact.Feature switch
         {
             AiFeature.EntryDigest => await BuildDigestJobAsync(db, artifact.SubjectId, ct),
             AiFeature.ProgressNarrative => await BuildNarrativeJobAsync(db, artifact.SubjectId, now, ct),
-            AiFeature.StandingNotes => await BuildStandingJobAsync(db, artifact.SubjectId, now, ct),
+            AiFeature.StandingNotes => await BuildStandingJobAsync(db, artifact.SubjectId, now, await BuildsOnAsync(ct), ct),
             AiFeature.RecommendedMatching => await BuildWorkKindsJobAsync(db, artifact.SubjectId, ct),
             AiFeature.ProfileReview => await BuildProfileReviewJobAsync(db, artifact.SubjectId, ct),
             AiFeature.ApplicationEvaluation => await BuildApplicationEvaluationJobAsync(db, artifact.SubjectId, ct),
             _ => throw new InvalidOperationException($"No job builder for {artifact.Feature}."),
         };
 
-        var hash = AiRules.InputHash(canonicalInput);
+        // The prompt's version is part of the hash: a reworded prompt is a
+        // changed input, and the answer to the old wording is not served.
+        var hash = AiRules.InputHash(artifact.Feature, canonicalInput);
         if (hash == artifact.InputHash && artifact.OutputJson is not null)
         {
             Restore(artifact); // unchanged input — the cache answers, no call
             return;
         }
 
-        if (!await quota.TryConsumeAsync(ct))
+        if (await quota.ConsumeAsync(AiSpender.Portal, ct) is var verdict && verdict != AiQuotaVerdict.Allowed)
         {
             // Skipped rather than queued: the panel simply does not appear
             // today, and a fresh request tomorrow starts clean.
-            Skip(artifact, "The daily AI call ceiling is reached — try again tomorrow.");
+            Skip(artifact, AiQuotaRules.Refusal(verdict));
             return;
         }
 
-        var config = await ai.ProviderConfigAsync(ct)
+        var route = await ai.RouteAsync(artifact.Feature, ct)
             ?? throw new InvalidOperationException("The AI provider key disappeared mid-run.");
-        var model = config.Model ?? AiProviderRequests.DefaultModel(config.Provider);
-        var answer = await providerClient.CompleteAsync(
-            config.Provider, model, config.ApiKey, prompt.System, prompt.User, ct);
+        var feature = AiPrompts.FeatureName(artifact.Feature);
+        AiAnswer answer;
+        try
+        {
+            // The active setup, or the standby when the active provider
+            // cannot be reached (AiCaller); the answer says which.
+            answer = await caller.CompleteAsync(route, artifact.Feature, prompt, ct);
+        }
+        catch (Exception e) when (AiRules.NothingRan(e))
+        {
+            // The provider never ran it, so the counted call is given back
+            // before the failure is judged.
+            await quota.RefundAsync(AiSpender.Portal, ct);
+            throw;
+        }
+        catch (AiProviderException e) when (e.Tokens is { } billed)
+        {
+            // A 200 with no answer in it was billed all the same, by
+            // whichever provider answered it.
+            await quota.SpendAsync(AiSpender.Portal, feature, e.Provider ?? route.Active.Provider, e.Model ?? route.Model, billed, ct);
+            throw;
+        }
+        await quota.SpendAsync(AiSpender.Portal, feature, answer.Provider, answer.Model, answer.Completion.Tokens ?? AiTokens.None, ct);
 
-        var canonical = AiOutputs.Validate(artifact.Feature, answer, out var error)
+        var canonical = AiOutputs.Validate(artifact.Feature, answer.Completion.Text, out var error)
             ?? throw new InvalidOperationException(error ?? "The model's answer failed validation.");
-        Complete(artifact, hash, canonical, config.Provider, model, now);
-        log.LogInformation("AI {Feature}/{Subject} drafted by {Provider}:{Model}.",
-            artifact.Feature, artifact.SubjectId, config.Provider, model);
+        // The names the input hid go back in, once the answer is known to
+        // be the shape the page reads.
+        if (aliases is not null) canonical = aliases.RestoreJson(canonical);
+        Complete(artifact, hash, canonical, answer.Provider, answer.Model, AiPrompts.Version(artifact.Feature), now, answer.Completion.Tokens);
+        log.LogInformation("AI {Feature}/{Subject} drafted by {Provider}:{Model}{Standby}.",
+            artifact.Feature, artifact.SubjectId, answer.Provider, answer.Model, answer.Standby ? " (standby)" : "");
     }
+
+    /// <summary>
+    /// What a job builder hands the run: the prompt, the canonical input it
+    /// is hashed by, and — where the input carried entrants under labels —
+    /// the aliases that put their names back into the answer.
+    /// </summary>
+    private sealed record AiJob((string System, string User) Prompt, string Input, AiAliases? Aliases = null);
 
     private static void Skip(AiArtifact artifact, string note)
     {
         artifact.Status = AiArtifactStatus.Skipped;
         artifact.Note = note;
+        artifact.NextAttemptAtUtc = null;
     }
 
     private static void Restore(AiArtifact artifact)
@@ -250,24 +297,30 @@ public sealed class AiWorker(
         artifact.Status = AiArtifactStatus.Done;
         artifact.Note = null;
         artifact.Attempts = 0;
+        artifact.NextAttemptAtUtc = null;
     }
 
     private static void Complete(
-        AiArtifact artifact, string hash, string outputJson, string provider, string? model, DateTimeOffset now)
+        AiArtifact artifact, string hash, string outputJson, string provider, string? model, int? promptVersion,
+        DateTimeOffset now, AiTokens? tokens)
     {
         artifact.Status = AiArtifactStatus.Done;
         artifact.InputHash = hash;
         artifact.OutputJson = outputJson;
         artifact.Provider = provider;
         artifact.Model = model;
+        artifact.PromptVersion = promptVersion;
+        artifact.InputTokens = tokens is { } t ? (int)Math.Min(t.Input, int.MaxValue) : null;
+        artifact.OutputTokens = tokens is { } o ? (int)Math.Min(o.Output, int.MaxValue) : null;
         artifact.Note = null;
         artifact.Attempts = 0;
+        artifact.NextAttemptAtUtc = null;
         artifact.CompletedAtUtc = now;
     }
 
     // ------------------------------------------------------ job builders
 
-    private static async Task<((string System, string User) Prompt, string Input)> BuildWorkKindsJobAsync(
+    private static async Task<AiJob> BuildWorkKindsJobAsync(
         AppDbContext db, Guid userId, CancellationToken ct)
     {
         var row = await db.Profiles.AsNoTracking()
@@ -284,7 +337,7 @@ public sealed class AiWorker(
         var taxonomy = AiInputs.Taxonomy();
         var profile = AiInputs.WorkKinds(
             row.Headline, row.Skills.Select(s => (s.Name, s.Level.ToString(), s.Years)));
-        return (AiPrompts.WorkKinds(taxonomy, profile), taxonomy + profile);
+        return new AiJob(AiPrompts.WorkKinds(taxonomy, profile), taxonomy + profile);
     }
 
     /// <summary>
@@ -292,13 +345,13 @@ public sealed class AiWorker(
     /// preview reads them to decide whether to queue this — the two must
     /// hash alike, or every open of the tab would be a fresh call.
     /// </summary>
-    private async Task<((string System, string User) Prompt, string Input)> BuildProfileReviewJobAsync(
+    private async Task<AiJob> BuildProfileReviewJobAsync(
         AppDbContext db, Guid userId, CancellationToken ct)
     {
         var facts = await ProfileReview.ReadAsync(db, userId, await github.CanConnectAsync(ct), ct)
             ?? throw new InvalidOperationException("That profile is gone.");
         var json = AiInputs.ProfileReview(facts);
-        return (AiPrompts.ProfileReview(json), json);
+        return new AiJob(AiPrompts.ProfileReview(json), json);
     }
 
     /// <summary>
@@ -306,7 +359,7 @@ public sealed class AiWorker(
     /// of it then — the lines the model is asked to word. Read off the row,
     /// never recomputed: the client decides on what was submitted.
     /// </summary>
-    private static async Task<((string System, string User) Prompt, string Input)> BuildApplicationEvaluationJobAsync(
+    private static async Task<AiJob> BuildApplicationEvaluationJobAsync(
         AppDbContext db, Guid applicationId, CancellationToken ct)
     {
         var a = await db.Applications.AsNoTracking()
@@ -337,10 +390,10 @@ public sealed class AiWorker(
             a.Advantages
                 .Select(k => ApplicationRules.Advantages.FirstOrDefault(v => v.Key == k).Label)
                 .Where(l => l is not null)!);
-        return (AiPrompts.ApplicationEvaluation(json), json);
+        return new AiJob(AiPrompts.ApplicationEvaluation(json), json);
     }
 
-    private async Task<((string System, string User) Prompt, string Input)> BuildDigestJobAsync(
+    private async Task<AiJob> BuildDigestJobAsync(
         AppDbContext db, Guid entryId, CancellationToken ct)
     {
         var e = await db.Entries.AsNoTracking()
@@ -406,10 +459,10 @@ public sealed class AiWorker(
                 e.MilestonesAll, e.MilestonesClaimed, languages,
                 fileCount, hasTests, hasReadme, hasCi, written),
             treePaths, readme, sendCode);
-        return (AiPrompts.Digest(input), input);
+        return new AiJob(AiPrompts.Digest(input), input);
     }
 
-    private static async Task<((string System, string User) Prompt, string Input)> BuildNarrativeJobAsync(
+    private static async Task<AiJob> BuildNarrativeJobAsync(
         AppDbContext db, Guid opportunityId, DateTimeOffset now, CancellationToken ct)
     {
         var c = await db.Opportunities.AsNoTracking()
@@ -458,12 +511,12 @@ public sealed class AiWorker(
             })
             .ToList();
 
-        var input = AiInputs.Narrative(
+        var (input, aliases) = AiInputs.Narrative(
             c.Title,
             c.Milestones.Select(m => new AiInputs.NarrativeMilestone(m.Title, m.DueUtc)).ToList(),
             entrants,
             now);
-        return (AiPrompts.Narrative(input), input);
+        return new AiJob(AiPrompts.Narrative(input), input, aliases);
     }
 
     /// <summary>
@@ -471,8 +524,15 @@ public sealed class AiWorker(
     /// computed scores and explained parts, for the model to put into words.
     /// The reader does every sum; the prompt forbids redoing any.
     /// </summary>
-    private static async Task<((string System, string User) Prompt, string Input)> BuildStandingJobAsync(
-        AppDbContext db, Guid opportunityId, DateTimeOffset now, CancellationToken ct)
+    /// <summary>Whether Docker Compose builds are on — so the notes read the same Builds line the board shows, or none.</summary>
+    private async Task<bool> BuildsOnAsync(CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<Preview.BuildHostService>().ReadyAsync(ct);
+    }
+
+    private static async Task<AiJob> BuildStandingJobAsync(
+        AppDbContext db, Guid opportunityId, DateTimeOffset now, bool buildsOn, CancellationToken ct)
     {
         var c = await db.Opportunities.AsNoTracking()
             .Where(x => x.Id == opportunityId)
@@ -485,7 +545,7 @@ public sealed class AiWorker(
             .SingleOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("The opportunity no longer exists.");
 
-        var rows = await StandingReader.ForOpportunitiesAsync(db, [opportunityId], now, ct);
+        var rows = await StandingReader.ForOpportunitiesAsync(db, [opportunityId], now, buildsOn, ct);
         if (rows.Count == 0)
             throw new InvalidOperationException("This opportunity has no active entrants to read.");
 
@@ -499,10 +559,10 @@ public sealed class AiWorker(
                 r.Note))
             .ToList();
 
-        var input = AiInputs.Standing(
+        var (input, aliases) = AiInputs.Standing(
             c.Title, OpportunityNames.StatusName(c.Status), Delivery.Name(c.Delivery), c.DeadlineUtc,
             c.Milestones, entrants, now);
-        return (AiPrompts.Standing(input), input);
+        return new AiJob(AiPrompts.Standing(input), input, aliases);
     }
 
     private async Task<(string Input, string Output)> RunSpamScanAsync(

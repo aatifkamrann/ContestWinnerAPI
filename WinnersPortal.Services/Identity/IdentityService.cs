@@ -29,29 +29,60 @@ public sealed class IdentityService(
 
     // --------------------------------------------------------------- start
 
-    public async Task<Outcome<IdentityStartResponse>> StartAsync(ClaimsPrincipal principal, CancellationToken ct)
+    public async Task<Outcome<IdentityStartResponse>> StartAsync(
+        ClaimsPrincipal principal, IdentityStartRequest? request, CancellationToken ct)
     {
         if (!await options.IsEnabledAsync(ct))
             return Outcome.Conflict("This portal is not verifying identities at the moment.");
         var config = await options.ProviderConfigAsync(ct);
-        if (config is null || config.WorkflowId.Length == 0)
+        if (config is null || IdentityOptions.MissingForStart(config) is not null)
             return Outcome.Unavailable();
 
         var me = Principal.UserId(principal)!.Value;
         var user = await db.Users.SingleOrDefaultAsync(u => u.Id == me, ct);
         if (user is null) return Outcome.Unauthorized();
+        var returnTo = IdentityRules.SafeReturn(request?.ReturnTo);
         var row = await db.IdentityVerifications.SingleOrDefaultAsync(v => v.UserId == me, ct);
-        if (row is not null && !IdentityRules.MayStart(row.Status))
+
+        // An unfinished session is picked up where it was left — a closed
+        // tab, a phone put down — rather than refused or started over. The
+        // provider is asked first, because it may have answered or let the
+        // session lapse since; only a session it still holds open is handed
+        // back, and one that lapsed falls through to a fresh one below. A
+        // session with a provider the portal has since switched away from
+        // is not offered: new work goes to the active provider.
+        var sameProvider = row is not null && row.Provider == config.Provider;
+        if (row is not null && IdentityRules.IsOpen(row.Status))
+        {
+            await PullVerdictAsync(row, user, ct);
+            if (sameProvider && IdentityRules.IsOpen(row.Status) && row.SessionUrl is not null)
+            {
+                if (returnTo is not null) row.ReturnPath = returnTo;
+                row.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return Outcome.Ok(new IdentityStartResponse { Url = row.SessionUrl, Resumed = true });
+            }
+        }
+        if (row is not null && !IdentityRules.MayStart(row.Status, canResume: sameProvider && row.SessionUrl is not null))
             return Outcome.Conflict(row.Status == IdentityStatus.Approved
                 ? "Your identity is already verified."
-                : "A verification is already under way — finish it, or wait for the provider's answer.");
+                : "The provider is reviewing your verification — you will get an email when it is decided.");
 
-        var publicUrl = (await settings.GetAsync("branding.publicUrl", ct) ?? "http://localhost").TrimEnd('/');
+        var publicUrl = (await settings.GetAsync(WebOrigin.WebUrlKey, ct) ?? "http://localhost").TrimEnd('/');
+        // Shufti Pro posts its verdicts where each request says; that is the
+        // API's own address, which on a split install is not the pages'.
+        var apiUrl = (await settings.GetAsync(WebOrigin.ApiUrlKey, ct))?.Trim().TrimEnd('/');
+        var ask = new IdentityProviderRequests.SessionAsk(
+            me,
+            IdentityProviderRequests.NewReference(me),
+            publicUrl + ReturnPath,
+            (string.IsNullOrEmpty(apiUrl) ? publicUrl : apiUrl) + IdentityProviderRequests.ShuftiWebhookPath,
+            user.Email,
+            null);
         IdentityProviderRequests.Session session;
         try
         {
-            session = await client.CreateSessionAsync(
-                config.Provider, config.ApiKey, config.WorkflowId, me, publicUrl + ReturnPath, user.Email, null, ct);
+            session = await client.CreateSessionAsync(config, ask, ct);
         }
         catch (Exception e) when (e is IdentityProviderException or HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -92,10 +123,12 @@ public sealed class IdentityService(
                 .ExecuteUpdateAsync(s => s.SetProperty(d => d.RemovedAtUtc, DateTimeOffset.UtcNow), ct);
             proofSignal.Wake();
         }
-        row.Status = IdentityRules.MapStatus(session.Status);
+        row.Status = IdentityRules.MapStatus(config.Provider, session.Status);
+        row.SessionUrl = session.Url;
+        row.ReturnPath = returnTo;
         row.UpdatedAtUtc = now;
         await db.SaveChangesAsync(ct);
-        return Outcome.Ok(new IdentityStartResponse { Url = session.Url });
+        return Outcome.Ok(new IdentityStartResponse { Url = session.Url, Resumed = false });
     }
 
     // -------------------------------------------------------------- status
@@ -104,6 +137,10 @@ public sealed class IdentityService(
     {
         var me = Principal.UserId(principal)!.Value;
         var row = await db.IdentityVerifications.AsNoTracking().SingleOrDefaultAsync(v => v.UserId == me, ct);
+        // An open session not heard of for a while is asked about, so its
+        // link stops being offered once the provider has let it lapse.
+        if (row is not null && IdentityRules.RecheckDue(row.Status, row.UpdatedAtUtc, DateTimeOffset.UtcNow))
+            return await RefreshUserAsync(me, Principal.Role(principal), ct);
         return Outcome.Ok(await StatusOfAsync(row, Principal.Role(principal), ct));
     }
 
@@ -123,25 +160,39 @@ public sealed class IdentityService(
     {
         var row = await db.IdentityVerifications.Include(v => v.User).SingleOrDefaultAsync(v => v.UserId == userId, ct);
         if (row is null || row.User is null) return Outcome.Ok(await StatusOfAsync(null, role, ct));
-        if (row.Status != IdentityStatus.Approved)
-        {
-            var config = await options.ProviderConfigAsync(ct);
-            if (config is not null && config.Provider == row.Provider)
-            {
-                try
-                {
-                    var decision = await client.ReadDecisionAsync(config.Provider, config.ApiKey, row.SessionId, ct);
-                    await ApplyVerdictAsync(row, row.User, decision.Status, decision.Reason, eventId: null, ct);
-                }
-                catch (Exception e) when (e is IdentityProviderException or HttpRequestException or TaskCanceledException or JsonException)
-                {
-                    // Nothing changes; the stored status stands and the
-                    // webhook, when it lands, is the answer.
-                    log.LogWarning(e, "Reading a verification decision failed against {Provider}.", config.Provider);
-                }
-            }
-        }
+        if (row.Status != IdentityStatus.Approved) await PullVerdictAsync(row, row.User, ct);
         return Outcome.Ok(await StatusOfAsync(row, role, ct));
+    }
+
+    /// <summary>
+    /// The session's verdict read from the provider that opened it — through
+    /// the active setup, or another setup of that provider when the portal
+    /// has since switched — and applied. A failed read changes nothing: the
+    /// stored status stands, and the webhook, when it lands, is the answer.
+    /// </summary>
+    private async Task PullVerdictAsync(IdentityVerification row, User user, CancellationToken ct)
+    {
+        var config = await options.ReaderForAsync(row.Provider, ct);
+        if (config is null) return;
+        try
+        {
+            var decision = await client.ReadDecisionAsync(config, row.SessionId, ct);
+            if (NoVerdict(row.Provider, decision.Status))
+            {
+                row.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            await ApplyVerdictAsync(row, user, decision.Status, decision.Reason, eventId: null, ct);
+        }
+        catch (Exception e) when (e is IdentityProviderException or HttpRequestException or TaskCanceledException or JsonException)
+        {
+            log.LogWarning(e, "Reading a verification decision failed against {Provider}.", config.Provider);
+            // Counted as a check all the same, so a provider that is down
+            // is not asked again on every status read until it recovers.
+            row.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
     }
 
     private async Task<IdentityStatusResponse> StatusOfAsync(IdentityVerification? row, string? role, CancellationToken ct)
@@ -158,6 +209,8 @@ public sealed class IdentityService(
             Status = IdentityRules.StatusName(row?.Status),
             VerifiedAtUtc = row?.Status == IdentityStatus.Approved ? row.DecidedAtUtc : null,
             Note = row?.Status == IdentityStatus.Declined ? row.Note : null,
+            ContinueUrl = row is not null && IdentityRules.IsOpen(row.Status) ? row.SessionUrl : null,
+            ReturnTo = row?.ReturnPath,
             Enabled = enabled,
             Required = await options.RequiredForRoleAsync(role, ct),
             RequiredFor = doors,
@@ -172,9 +225,10 @@ public sealed class IdentityService(
     public async Task<Outcome<IdentityWebhookResponse>> ReceiveAsync(
         byte[] payload, string? signature, string? timestamp, CancellationToken ct)
     {
-        // Every setup's secret, active or not: a session opened under a
-        // setup since switched off still reports back through it.
+        // Every Didit setup's secret, active or not: a session opened under
+        // a setup since switched off still reports back through it.
         var secrets = (await settings.SetupsAsync(Setups.Identity, ct))
+            .Where(s => (s.Get(IdentityKeys.Provider)?.Trim().ToLowerInvariant() ?? "") is "" or IdentityProviders.Didit)
             .Select(s => s.Get(IdentityKeys.WebhookSecret))
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct(StringComparer.Ordinal)
@@ -228,13 +282,89 @@ public sealed class IdentityService(
         return Outcome.Ok(new IdentityWebhookResponse { Ok = true, Note = note });
     }
 
-    /// <summary>The whole dispatch, shared with the admin console's replay — a replayed delivery must take exactly the live path.</summary>
+    /// <summary>
+    /// A Shufti Pro callback. It is signed with a setup's own secret key
+    /// (<see cref="ShuftiSignature"/>) — every Shufti Pro setup is tried,
+    /// active or not — and carries no time, so the body's hash is its
+    /// delivery id: the same callback twice is taken once.
+    /// </summary>
+    /// <param name="payload">The body exactly as it arrived — the signature is over these bytes.</param>
+    /// <param name="signature">The Signature header.</param>
+    public async Task<Outcome<IdentityWebhookResponse>> ReceiveShuftiAsync(byte[] payload, string? signature, CancellationToken ct)
+    {
+        var keys = (await options.AllConfigsAsync(ct))
+            .Where(c => c.Provider == IdentityProviders.ShuftiPro)
+            .Select(c => c.ApiKey)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (keys.Count == 0)
+        {
+            log.LogWarning("Shufti Pro callback received but no Shufti Pro setup has a secret key; dropping it.");
+            return Outcome.Unavailable();
+        }
+        if (!keys.Any(key => ShuftiSignature.Verify(key, payload, signature)))
+        {
+            log.LogWarning("Shufti Pro callback signature did not verify; dropping the delivery.");
+            return Outcome.Unauthorized();
+        }
+
+        using var json = JsonDocument.Parse(payload);
+        var root = json.RootElement;
+        var reference = Text(root, "reference");
+        var shuftiEvent = Text(root, "event");
+        if (reference is null || shuftiEvent is null)
+            return Outcome.Invalid("Missing reference or event.");
+
+        var deliveryId = ShuftiSignature.DeliveryId(payload);
+        var delivery = new WebhookDelivery
+        {
+            Id = Guid.NewGuid(),
+            Source = WebhookDelivery.Identity,
+            DeliveryId = deliveryId,
+            Event = "callback",
+            Action = shuftiEvent,
+            Payload = Encoding.UTF8.GetString(payload),
+            ReceivedAtUtc = DateTimeOffset.UtcNow,
+        };
+        db.WebhookDeliveries.Add(delivery);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException e) when (DbErrors.IsUniqueViolation(e))
+        {
+            return Outcome.Ok(new IdentityWebhookResponse { Ok = true, Note = "duplicate delivery" });
+        }
+
+        var note = await HandleAsync(reference, shuftiEvent,
+            IdentityProviderRequests.DeclineReason(IdentityProviders.ShuftiPro, root), deliveryId, ct);
+        delivery.HandledNote = note;
+        await db.SaveChangesAsync(ct);
+        return Outcome.Ok(new IdentityWebhookResponse { Ok = true, Note = note });
+    }
+
+    /// <summary>
+    /// The whole dispatch, shared with the admin console's replay — a
+    /// replayed delivery must take exactly the live path. A Shufti Pro event
+    /// that says only "something changed" has the request's status read
+    /// back instead; one that is no verdict at all is noted and left.
+    /// </summary>
     public async Task<string> HandleAsync(string sessionId, string status, string? reason, string? eventId, CancellationToken ct)
     {
         var row = await db.IdentityVerifications.Include(v => v.User).SingleOrDefaultAsync(v => v.SessionId == sessionId, ct);
         if (row is null || row.User is null) return "no matching verification";
         if (eventId is not null && row.LastEventId == eventId) return "already applied";
         var before = row.Status;
+        if (row.Provider == IdentityProviders.ShuftiPro && ShuftiEvents.Ignored(status))
+            return $"{status}: no verdict, left {IdentityRules.StatusName(row.Status)}";
+        if (row.Provider == IdentityProviders.ShuftiPro && ShuftiEvents.ReadBack(status))
+        {
+            if (eventId is not null) row.LastEventId = eventId;
+            await PullVerdictAsync(row, row.User, ct);
+            return before == row.Status
+                ? $"{status}: read back, still {IdentityRules.StatusName(row.Status)}"
+                : $"{status}: read back, {IdentityRules.StatusName(before)} → {IdentityRules.StatusName(row.Status)}";
+        }
         await ApplyVerdictAsync(row, row.User, status, reason, eventId, ct);
         return before == row.Status
             ? $"still {IdentityRules.StatusName(row.Status)}"
@@ -250,13 +380,16 @@ public sealed class IdentityService(
     private async Task ApplyVerdictAsync(
         IdentityVerification row, User user, string providerStatus, string? reason, string? eventId, CancellationToken ct)
     {
-        var status = IdentityRules.MapStatus(providerStatus);
+        var status = IdentityRules.MapStatus(row.Provider, providerStatus);
         var now = DateTimeOffset.UtcNow;
         var changed = status != row.Status;
         row.Status = status;
         row.UpdatedAtUtc = now;
         if (eventId is not null) row.LastEventId = eventId;
         if (IdentityRules.IsFinal(status)) row.DecidedAtUtc ??= now;
+        // The provider's page is only worth offering while the member can
+        // still finish there; answered, under review or lapsed, it goes.
+        if (!IdentityRules.IsOpen(status)) row.SessionUrl = null;
 
         if (status == IdentityStatus.Approved)
         {
@@ -335,23 +468,24 @@ public sealed class IdentityService(
     {
         var config = await options.ProviderConfigAsync(setupId, ct);
         if (config is null)
-            return (false, "This setup has no API key saved — add one above and save first.");
-        if (!Guid.TryParse(config.WorkflowId, out _))
-            return (false, "The workflow ID is not the UUID the provider's console shows — copy it again.");
-        if (string.IsNullOrWhiteSpace(config.WebhookSecret))
-            return (false, "No webhook secret is saved — verdicts would arrive only when a member returns to the portal.");
+            return (false, "This setup has no key saved — add one above and save first.");
+        if (IdentityProviders.Find(config.Provider) is null)
+            return (false, $"“{config.Provider}” is not a provider this portal knows — choose one from the list.");
+        var label = IdentityProviders.LabelOf(config.Provider);
+        if (config.Provider == IdentityProviders.Didit)
+        {
+            if (!Guid.TryParse(config.WorkflowId, out _))
+                return (false, "The workflow ID is not the UUID the provider's console shows — copy it again.");
+            if (string.IsNullOrWhiteSpace(config.WebhookSecret))
+                return (false, "No webhook secret is saved — verdicts would arrive only when a member returns to the portal.");
+        }
+        if (config.Provider == IdentityProviders.ShuftiPro && config.ClientId.Length == 0)
+            return (false, "No client ID is saved — Shufti Pro signs in with the client ID and secret key together.");
         try
         {
-            var status = await client.ProbeAsync(
-                IdentityProviderRequests.ReadDecision(config.Provider, config.ApiKey, Guid.NewGuid().ToString()), ct);
-            return status switch
-            {
-                404 => (true, $"{config.Provider} accepted the key (“{config.Setup}”). Workflow and webhook secret are set; the first real verification proves the workflow."),
-                401 or 403 => (false, $"{config.Provider} rejected the key ({status}) — check it in the provider's console."),
-                429 => (false, $"{config.Provider} is rate-limiting this portal ({status}) — try again in a minute."),
-                >= 500 => (false, $"{config.Provider} is not available right now ({status})."),
-                _ => (false, $"{config.Provider} answered {status} to the probe; the key may still be fine — try a real verification."),
-            };
+            var (status, body) = await client.ProbeAsync(
+                IdentityProviderRequests.ReadDecision(config, IdentityProviderRequests.NewReference(Guid.Empty)), ct);
+            return IdentityRules.ProbeAnswer(config.Provider, label, config.Setup, status, body);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
@@ -359,6 +493,10 @@ public sealed class IdentityService(
             return (false, "The provider could not be reached from this server. The API log has the connection error.");
         }
     }
+
+    /// <summary>Whether a provider's word is no verdict to apply: Shufti Pro's "something changed" and "deleted" events.</summary>
+    private static bool NoVerdict(string provider, string status) =>
+        provider == IdentityProviders.ShuftiPro && (ShuftiEvents.ReadBack(status) || ShuftiEvents.Ignored(status));
 
     private static string? Text(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

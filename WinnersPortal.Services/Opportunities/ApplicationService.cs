@@ -25,7 +25,7 @@ namespace WinnersPortal.Services.Opportunities;
 /// per application; selecting makes the entry, by the rules the old door
 /// enforced, so a selection can still be refused.
 /// </summary>
-public sealed class ApplicationService(AppDbContext db, SettingsService settings, AiOptions ai, AiWorkSignal aiSignal, EmailWorkSignal emailSignal, ILiveBoard live, IHttpClientFactory httpFactory, GitHubWorkSignal githubSignal, ActivityNote activity, AiQuota quota, AiProviderClient providerClient, ILogger<AiService.AiFormDraftLog> log, IdentityOptions identity)
+public sealed class ApplicationService(AppDbContext db, SettingsService settings, AiOptions ai, AiWorkSignal aiSignal, EmailWorkSignal emailSignal, ILiveBoard live, IHttpClientFactory httpFactory, GitHubWorkSignal githubSignal, ActivityNote activity, AiQuota quota, AiInlineCache aiCache, AiCaller caller, ILogger<AiService.AiFormDraftLog> log, IdentityOptions identity, GitHubService github, PublicReads publicReads)
 {
     public async Task<Outcome<ApplyFormResponse>> ApplyFormAsync(string slug, ClaimsPrincipal principal, CancellationToken ct)
     {
@@ -97,6 +97,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
                 Status = OpportunityNames.StatusName(c.Status),
                 Delivery = Delivery.Name(c.Delivery),
                 NeedsGithubUsername = Delivery.NeedsGithubUsername(c.Delivery),
+                Kind = MilestonePay.KindName(c.Kind),
                 Category = c.Category,
                 CategoryLabel = OpportunityCategories.Find(c.Category)?.Label,
                 Skills = requiredSkills,
@@ -136,7 +137,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             SuggestedAdvantages = fit is null ? [] : ApplicationRules.SuggestedAdvantages(fit, relevantCount),
             Application = application is null
                 ? null
-                : await ApplicantViewAsync(db, application, c.Category, c.Status, startsAt, now, ct),
+                : await ApplicantViewAsync(db, application, c.Category, c.Status, startsAt, now, await ai.PublicNameAsync(ct), ct),
         });
     }
 
@@ -266,7 +267,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
         if (evaluate) aiSignal.Wake();
         emailSignal.Wake();
         await live.OpportunityChangedAsync(c.Slug, ct); // the client's review box just grew
-        return Outcome.Ok(await ApplicantViewAsync(db, application, c.Category, c.Status, startsAt, now, ct));
+        return Outcome.Ok(await ApplicantViewAsync(db, application, c.Category, c.Status, startsAt, now, await ai.PublicNameAsync(ct), ct));
     }
 
     public async Task<Outcome<IEnumerable<MyApplicationRow>>> MineAsync(ClaimsPrincipal principal, CancellationToken ct)
@@ -346,7 +347,8 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             return Outcome.NotFound();
         var now = DateTimeOffset.UtcNow;
         return Outcome.Ok(await ApplicantViewAsync(
-            db, application, c.Category, c.Status, Schedule.StartsAt(c.StartsAtUtc, c.PublishedAtUtc), now, ct));
+            db, application, c.Category, c.Status, Schedule.StartsAt(c.StartsAtUtc, c.PublishedAtUtc), now,
+            await ai.PublicNameAsync(ct), ct));
     }
 
     public async Task<Outcome<DecisionResponse>> DecideAsync(Guid id, DecideRequest request, ClaimsPrincipal principal, CancellationToken ct)
@@ -392,8 +394,18 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
                 .SingleOrDefaultAsync(ct)
             : null;
         var workArrived = held is not null && (held.Entry.PushCount > 0 || held.Claimed || held.Uploaded);
-        if (ApplicationRules.DecisionProblem(application.Status, next, opportunity.Status, workArrived) is { } problem)
+        if (ApplicationRules.DecisionProblem(application.Status, next, opportunity.Status, workArrived, opportunity.Kind) is { } problem)
             return Outcome.Conflict(problem);
+        // Paid by milestone, selecting is hiring, and the client reviews
+        // every milestone in the repository before paying for it — so where
+        // there is one, their GitHub account must be connected to read it,
+        // as announcing a winner asks.
+        var hiring = MilestonePay.ByMilestone(opportunity.Kind) && selected.Value;
+        if (hiring && Delivery.UsesRepository(opportunity.Delivery)
+            && await github.IsConfiguredAsync(ct) && opportunity.Client!.GithubLogin is null)
+            return Outcome.Conflict(
+                "Connect your GitHub account before hiring — you read each milestone in the repository before "
+                + "paying for it, and it transfers to you once the last one is paid.");
 
         var now = DateTimeOffset.UtcNow;
         var byAdmin = isAdmin && opportunity.ClientId != meId;
@@ -411,11 +423,42 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             if (joined.Problem is not null) return Outcome.Conflict(joined.Problem);
             application.Status = ApplicationStatus.Selected;
             application.EntryId = joined.Entry!.Id;
-            Notify.Queue(db, applicant, "application_selected", Emails.ApplicationSelected(
-                opportunity.Title, opportunity.Slug, opportunity.Client!.DisplayName, opportunity.AwardAmount, opportunity.Currency,
-                opportunity.Delivery, opportunity.DeadlineUtc, opportunity.EntryCloseUtc,
-                opportunity.Milestones.Select(m => (m.Title, m.DueUtc)).ToList(),
-                joined.EntrantNumber, application.GithubUsername));
+            if (hiring)
+            {
+                // The hire is the award: one freelancer, the whole amount,
+                // paid milestone by milestone from here. The opportunity is
+                // filled, and everyone still waiting is told so.
+                db.Awards.Add(new Award
+                {
+                    Id = Guid.NewGuid(),
+                    OpportunityId = opportunity.Id,
+                    EntryId = joined.Entry.Id,
+                    Amount = opportunity.AwardAmount,
+                    Currency = opportunity.Currency,
+                    AnnouncedAtUtc = now,
+                });
+                opportunity.Status = OpportunityStatus.Awarded;
+                Notify.Queue(db, applicant, "application_hired", Emails.Hired(
+                    opportunity.Title, opportunity.Slug, opportunity.Client!.DisplayName, opportunity.AwardAmount,
+                    opportunity.Currency, opportunity.Delivery,
+                    opportunity.Milestones.OrderBy(m => m.Order).Select(m => (m.Title, m.DueUtc, m.Amount)).ToList(),
+                    application.GithubUsername));
+                var waiting = await db.Applications.Include(x => x.Freelancer)
+                    .Where(x => x.OpportunityId == opportunity.Id && x.Id != application.Id
+                        && x.Status == ApplicationStatus.UnderReview)
+                    .ToListAsync(ct);
+                foreach (var other in waiting)
+                    Notify.Queue(db, other.Freelancer!, "application_closed_undecided",
+                        Emails.ApplicationClosedByHire(opportunity.Title));
+            }
+            else
+            {
+                Notify.Queue(db, applicant, "application_selected", Emails.ApplicationSelected(
+                    opportunity.Title, opportunity.Slug, opportunity.Client!.DisplayName, opportunity.AwardAmount, opportunity.Currency,
+                    opportunity.Delivery, opportunity.DeadlineUtc, opportunity.EntryCloseUtc,
+                    opportunity.Milestones.Select(m => (m.Title, m.DueUtc)).ToList(),
+                    joined.EntrantNumber, application.GithubUsername));
+            }
         }
         else if (takenBack)
         {
@@ -427,6 +470,13 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             {
                 entry.Status = EntryStatus.Deselected;
                 entry.WithdrawnAtUtc = now;
+            }
+            // A hire taken back before any work: the award it made goes,
+            // and the opportunity is open to hire again.
+            if (MilestonePay.ByMilestone(opportunity.Kind) && opportunity.Status == OpportunityStatus.Awarded)
+            {
+                await db.Awards.Where(x => x.OpportunityId == opportunity.Id).ExecuteDeleteAsync(ct);
+                opportunity.Status = OpportunityStatus.Open;
             }
             application.Status = ApplicationStatus.NotSelected;
             application.EntryId = null;
@@ -461,6 +511,8 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             await Recount.OpportunityAsync(db, opportunity.Id, ct); // the card's entrant counter
             githubSignal.Wake(); // the worker provisions the private repo, or archives one taken back
         }
+        // A hire, or one taken back, moves the opportunity on or off the feed's open list.
+        if (MilestonePay.ByMilestone(opportunity.Kind) && (selected.Value || takenBack)) publicReads.Clear();
         emailSignal.Wake();
         await live.OpportunityChangedAsync(opportunity.Slug, ct); // the entrant list or the review box changed
         return Outcome.Ok(new DecisionResponse
@@ -508,7 +560,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
                 .Where(x => fits is null || fits(ProjectFacts.Of(x.Category, x.Title, x.Description, x.Outcome, x.Role, x.Tech)))
                 .Select(x => (x.Title, x.Tech, x.Outcome)).ToList(),
             request.Draft);
-        return await AiService.DraftInlineAsync(f, AiPrompts.ProjectApproach(json), ai, quota, providerClient, log, ct);
+        return await AiService.DraftInlineAsync(f, AiPrompts.ProjectApproach(json), principal, ai, quota, aiCache, caller, log, ct);
     }
 
     /// <summary>
@@ -519,7 +571,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
     /// </summary>
     internal static async Task<ApplicationView> ApplicantViewAsync(
         AppDbContext db, Application a, string? category, OpportunityStatus opportunityStatus, DateTimeOffset? startsAt,
-        DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset now, string aiName, CancellationToken ct)
     {
         var artifact = await db.AiArtifacts.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Feature == AiFeature.ApplicationEvaluation && x.SubjectId == a.Id, ct);
@@ -530,16 +582,20 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
         // Whether a selection won is asked only of an awarded opportunity.
         var won = opportunityStatus == OpportunityStatus.Awarded && a.EntryId is { } entryId
             && await db.Awards.AnyAsync(x => x.EntryId == entryId, ct);
+        // Paid by milestone, the award is the hire.
+        var hired = won && await db.Opportunities.AnyAsync(
+            o => o.Id == a.OpportunityId && o.Kind == OpportunityKind.Milestones, ct);
         return View(a, artifact, ApplicationRules.StrongerThan(a.MatchAtSubmit, others),
-            OpportunityCategories.Find(category)?.Label, opportunityStatus, won, startsAt, now);
+            OpportunityCategories.Find(category)?.Label, opportunityStatus, won, startsAt, now, aiName, hired);
     }
 
     internal static ApplicationView View(
         Application a, AiArtifact? artifact, int? strongerThan, string? categoryLabel,
-        OpportunityStatus opportunityStatus, bool won, DateTimeOffset? startsAt, DateTimeOffset now)
+        OpportunityStatus opportunityStatus, bool won, DateTimeOffset? startsAt, DateTimeOffset now, string aiName,
+        bool hired = false)
     {
         var stored = StoredEvaluation(a.EvaluationJson);
-        var evaluation = Worded(stored, artifact);
+        var evaluation = Worded(stored, artifact, aiName);
         var decided = a.DecidedAtUtc is not null;
         var evaluationState = artifact?.Status == AiArtifactStatus.Pending ? "current" : "done";
         var closedUndecided = ApplicationRules.ClosedUndecided(a.Status, opportunityStatus);
@@ -574,7 +630,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             // Once selected, how the competition went — open, reviewing, won,
             // lost or cancelled — so the page never congratulates over an
             // opportunity that ended otherwise. Null for every other status.
-            Outcome = ApplicationRules.Outcome(a.Status, opportunityStatus, won),
+            Outcome = ApplicationRules.Outcome(a.Status, opportunityStatus, won, hired),
             // Where it stands: the five stages the page draws, each done,
             // current or still to come.
             Stages = new[]
@@ -621,7 +677,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
     /// about a line that is not there. The figure and the lines are the
     /// portal's whatever the model said.
     /// </summary>
-    private static EvaluationView Worded(Evaluation stored, AiArtifact? artifact)
+    private static EvaluationView Worded(Evaluation stored, AiArtifact? artifact, string aiName)
     {
         var words = new Dictionary<string, string>(StringComparer.Ordinal);
         string? note = null;
@@ -660,7 +716,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
             Risks = stored.Risks.Select(Line),
             Note = note,
             Worded = words.Count > 0 || note is not null,
-            Provider = AiBrand.Public(artifact?.Provider),
+            Provider = AiBrand.Public(artifact?.Provider, aiName),
             CompletedAtUtc = artifact?.CompletedAtUtc,
         };
     }
@@ -673,7 +729,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
     /// </summary>
     internal static async Task<IReadOnlyList<ApplicationReviewRow>> ReviewRowsAsync(
         AppDbContext db, Guid opportunityId, string? category, OpportunityStatus opportunityStatus, DateTimeOffset? startsAt,
-        DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset now, string aiName, CancellationToken ct)
     {
         var rows = await db.Applications.AsNoTracking()
             .Where(a => a.OpportunityId == opportunityId)
@@ -732,7 +788,7 @@ public sealed class ApplicationService(AppDbContext db, SettingsService settings
                     r.Application.MatchAtSubmit,
                     matches.Where((_, i) => rows[i].Application.Id != r.Application.Id).ToList()),
                 categoryLabel, opportunityStatus,
-                winnerEntryId is not null && r.Application.EntryId == winnerEntryId, startsAt, now),
+                winnerEntryId is not null && r.Application.EntryId == winnerEntryId, startsAt, now, aiName),
             WithdrawnReason = r.Application.Status == ApplicationStatus.Withdrawn && r.Application.EntryId is { } entryId
                 ? withdrawnReasons.GetValueOrDefault(entryId)
                 : null,

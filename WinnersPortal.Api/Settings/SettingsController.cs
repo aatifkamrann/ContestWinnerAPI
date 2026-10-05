@@ -219,7 +219,7 @@ public sealed class SettingsController(SettingsAdminService settingsAdmin) : Con
             return await Answer(false, "This setup has no API key saved — add one above and save first.");
         // The ceiling is the portal's, not the provider's: refused here,
         // the call never left, so the setup's last test is left alone.
-        if (!await quota.TryConsumeAsync(ct))
+        if (await quota.ConsumeAsync(AiSpender.Portal, ct) != AiQuotaVerdict.Allowed)
         {
             var (used, limit) = await quota.StateAsync(ct);
             return Results.Ok(new SetupTestNotRunResponse
@@ -232,14 +232,19 @@ public sealed class SettingsController(SettingsAdminService settingsAdmin) : Con
         {
             var model = config.Model ?? AiProviderRequests.DefaultModel(config.Provider);
             var (system, user) = AiPrompts.Ping;
-            _ = await providerClient.CompleteAsync(config.Provider, model, config.ApiKey, system, user, ct);
+            var answer = await providerClient.CompleteAsync(config.Provider, model, config.ApiKey, system, user, AiOutputs.PingSchema, ct, "settings test");
+            await quota.SpendAsync(AiSpender.Portal, AiPrompts.SettingsTestFeature, config.Provider, model, answer.Tokens ?? AiTokens.None, ct);
+            var cost = answer.Tokens is { } t && (await ai.PricesAsync(ct)).Cost(model, t) is { } usd ? $", about {AiPrices.Dollars(usd)}" : "";
             return await Answer(true,
-                $"{config.Provider} answered through model {model} (“{config.Setup}”). One call was counted against today's ceiling.");
+                $"{config.Provider} answered through model {model} (“{config.Setup}”). One call was counted against today's ceiling"
+                + (answer.Tokens is { } tokens ? $": {tokens} tokens{cost}." : "."));
         }
         catch (Exception e) when (e is AiProviderException or HttpRequestException or TaskCanceledException)
         {
             // The screen gets the readable line; the provider's own words
-            // go to the log, which is where a key or a bill is diagnosed.
+            // go to the log, which is where a key or a bill is diagnosed. A
+            // call the provider never ran is given back to the ceiling.
+            if (AiRules.NothingRan(e)) await quota.RefundAsync(AiSpender.Portal, ct);
             log.LogWarning(e, "The AI connection test failed against {Provider}.", config.Provider);
             return await Answer(false, AiRules.FailureNote(e) + " The provider's own words are in the API log.");
         }

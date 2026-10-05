@@ -2,10 +2,19 @@ using WinnersPortal.Services.Common;
 
 namespace WinnersPortal.Services.Identity;
 
+/// <summary>What the browser sends to start, or pick up, a verification.</summary>
+public sealed record IdentityStartRequest
+{
+    /// <summary>The page on this portal it was started from; the return page sends the member back there. A path only.</summary>
+    public string? ReturnTo { get; init; }
+}
+
 /// <summary>A verification started: where to send the member.</summary>
 public sealed record IdentityStartResponse
 {
     public required string Url { get; init; }
+    /// <summary>True when this is the member's unfinished session picked up where it was left, not a new one.</summary>
+    public required bool Resumed { get; init; }
 }
 
 /// <summary>Where a member stands, and which of their doors ask for it.</summary>
@@ -16,6 +25,14 @@ public sealed record IdentityStatusResponse
     public required DateTimeOffset? VerifiedAtUtc { get; init; }
     /// <summary>The provider's reason category on a decline; null otherwise.</summary>
     public required string? Note { get; init; }
+    /// <summary>
+    /// The provider's page for a session the member started and has not
+    /// finished — while it may still be finished; null otherwise. The
+    /// profile shows it until the session is answered or lapses.
+    /// </summary>
+    public required string? ContinueUrl { get; init; }
+    /// <summary>The page on this portal the last verification was started from; the return page goes back there.</summary>
+    public required string? ReturnTo { get; init; }
     /// <summary>Whether this portal verifies anybody at all.</summary>
     public required bool Enabled { get; init; }
     /// <summary>Whether any of this member's doors asks — the shell's cue to invite them.</summary>

@@ -66,7 +66,9 @@ public static class HelpRegistry
             "Several AI providers or keys. One is active at a time, and every AI call goes to it.",
             "Each setup is one provider, API key and model. Only one setup is active at a time — switching one on "
             + "switches the others off — and every AI call goes to it. When the active provider rejects the key, "
-            + "lacks the model, is over its quota or is down, the call fails as before; no other provider is asked.\n\n"
+            + "lacks the model, is over its quota or is down, the call fails as before — unless another setup is marked "
+            + "Standby, which is asked the same prompt when the active provider cannot be reached: over its quota, "
+            + "down, timing out or paused. Never when it answered and refused.\n\n"
             + "The master switch, the daily call limit, the code-excerpt switch and every feature switch apply "
             + "whichever provider is active.\n\n"
             + "Test provider proves one setup at a time, active or not, and counts one call. " + SetupBadge,
@@ -108,10 +110,28 @@ public static class HelpRegistry
         new("settings.ai.model",
             "Model identifier passed to the provider. Leave blank to use the recommended default.",
             "Set this only if you have a reason to pin a specific model — a newer release, or one with a larger "
-            + "context window for long briefs. Blank resolves to gemini-3.6-flash, claude-sonnet-5 or gpt-5.5, "
-            + "by provider.",
+            + "context window for long briefs. Blank resolves to gemini-3.6-flash, claude-sonnet-5-5 or gpt-5.5, "
+            + "by provider.\n\nThis is the setup's own model. Model per feature, under the switches and limits, names a "
+            + "different one for a feature — a quick model for the quick inline tools — and wins for that feature on "
+            + "the active setup.",
             Why: "An identifier the provider does not recognise makes every AI job fail. Blank is the safe choice.",
             Example: "gpt-5.5"),
+
+        new("settings." + Settings.AiOptions.StandbyKey,
+            "Whether this setup is asked when the active provider cannot be reached. Only an inactive setup stands by.",
+            "Mark one inactive setup — another provider, or the same provider under another key — and it is asked "
+            + "the same prompt whenever the active provider is over its quota, down, times out or is paused after "
+            + "repeated failures. It is not asked when the active provider answered and refused, rejected the key "
+            + "or lacks the model: those are answers, and a second provider is not asked to overrule them. The "
+            + "standby's call is its own row in Admin → Activity, marked standby, and the draft records the provider "
+            + "and model that wrote it. A standby answers with its own model, not the ones named per feature.\n\n"
+            + "The daily call limit, the budget and the member caps count the standby's calls like any other. "
+            + "With several setups marked, the first in the list is the one asked. Run the eval set against the "
+            + "standby model before marking it (evals/README.md in the source): a standby that answers worse than "
+            + "the active model is a quiet downgrade on a bad day.",
+            Why: "A provider's bad hour is otherwise every AI feature's bad hour. A standby turns it into one row in "
+                 + "the log — but only one whose answers have been checked, because nobody reads the standby's drafts "
+                 + "any more carefully than the active one's."),
 
         new("settings.ai.dailyCallLimit",
             "Hard ceiling on provider calls per day. The portal stops before your free tier does.",
@@ -122,6 +142,66 @@ public static class HelpRegistry
             Why: "This is what keeps 'free' honest. Without a ceiling, a burst of entries could exhaust a free tier "
                  + "or run up a bill on a paid one.",
             Example: "200"),
+
+        new("settings." + Ai.AiLimits.CallTimeoutKey,
+            "How long one attempt at the provider may take before the portal gives up on it and, retries allowing, tries again.",
+            "Counted per attempt, not per call: with two retries, a call may take up to three times this plus the "
+            + "short waits between attempts. The default suits the current models on a normal day; a slow model or a "
+            + "long board of entrants may want more. A member's inline tool shows the failure line only once every "
+            + "attempt has run out.\n\n"
+            + "The change is in force for the next call. Blank keeps the default.",
+            Why: "A call that is never abandoned holds a worker thread and a member's button for as long as the "
+                 + "provider cares to stall. A bound turns a stall into a retry, and a retry into a readable failure.",
+            Example: "60"),
+
+        new("settings." + Ai.AiLimits.RetriesKey,
+            "Further attempts within one call after a 429, a 5xx, a timed-out attempt or a connection that never answered.",
+            "A provider's bad minute usually passes within seconds, and a retry with a short wait (two seconds, "
+            + "then four, each a little randomised; the provider's own Retry-After header when it sends one) gets "
+            + "the answer most of the time. A 4xx is never retried: the request was at fault and would be again. "
+            + "Each attempt is its own row in Admin → Activity, so what the provider did is on record.\n\n"
+            + "Zero turns retries off; five is the most. The daily ceiling counts one call however many attempts "
+            + "it took, and gives it back when none of them ran.",
+            Why: "Without retries, every brief hiccup at the provider reaches a member as a failure. With too many, "
+                 + "a provider that is genuinely down holds every call for minutes.",
+            Example: "2"),
+
+        new("settings." + Ai.AiLimits.PauseKey,
+            "How long the portal sends nothing to the provider once half of the last minute's calls have failed.",
+            "The portal watches the last minute of calls; when at least four have run and half of them failed "
+            + "(a 429, a 5xx, a timeout, no connection), it stops sending for this many seconds. Members see a "
+            + "line saying the assistant is resting; queued drafts wait and are tried again after. When the "
+            + "pause ends, one call is let through to see whether the provider is back.\n\n"
+            + "Zero never pauses. The default of a minute is enough for most outages' first minute, which is "
+            + "where retries would otherwise pile up.",
+            Why: "Retrying into a provider that is down spends the daily ceiling on calls that cannot succeed and "
+                 + "makes the outage worse for everyone sharing the key. Pausing is cheaper than failing a hundred times.",
+            Example: "60"),
+
+        new("settings." + Ai.AiLimits.MemberDailyKey,
+            "How many inline AI drafts one member may ask for per UTC day — the form tools, the profile summary, the approach draft.",
+            "The inline tools are the ones a member presses and waits for: the opportunity form's six, the "
+            + "profile summary and the application's approach draft. Each press is one call against this cap "
+            + "and one against the portal's daily call limit; queued work (digests, reviews, notes) is not a "
+            + "member's and is not counted here. A press on a form that has not changed within the hour is "
+            + "answered from memory and counts against neither. Administrators are not capped.\n\n"
+            + "Zero refuses every inline tool. The default leaves a client room to draft a whole opportunity "
+            + "several times over.",
+            Why: "The daily call limit is shared by everyone. Without a per-member cap, one member pressing a "
+                 + "button all afternoon can use up the day for the rest.",
+            Example: "30"),
+
+        new("settings." + Ai.AiLimits.MemberPerMinuteKey,
+            "How many inline AI drafts one member may ask for in any one minute.",
+            "A guard against a key held down or a script, not a budget: past it the press is refused at once "
+            + "with a line asking for a moment, nothing is sent, and nothing is counted against the daily caps. "
+            + "A refused press still counts toward the minute, so holding the button keeps refusing rather than "
+            + "letting one through every so often.\n\n"
+            + "Zero refuses every inline tool. Counted per API process, so a second process would allow a "
+            + "second minute's worth — near enough for a guard.",
+            Why: "A generation takes seconds and spends money. Six in a minute is more than a person pressing "
+                 + "and reading can do; more than that is not a person.",
+            Example: "6"),
 
         new("settings.ai.sendCodeToProvider",
             "Allows entrant code excerpts to be sent to the external model provider.",
@@ -231,6 +311,135 @@ public static class HelpRegistry
             + "is still one press away.",
             Why: "A rubric written after the entries arrive is a rubric written around them. Drafting it from "
                  + "the brief, before publishing, is what makes the promise to entrants a real one."),
+
+        new("settings." + Ai.AiPrices.Key,
+            "Each model's price per million tokens sent and per million answered, in US dollars, from the provider's page.",
+            "A token is the unit every provider bills by: roughly three-quarters of a word of English, more for "
+            + "JSON. Every call the portal makes comes back with its count, and the count is kept on the draft, on the "
+            + "day's rows and on the call's row in Admin → Activity. This list turns counts into dollars: one model "
+            + "per line, its name as the provider spells it, then the price per million tokens sent, then per million "
+            + "answered — \"gemini-3.6-flash 0.30 2.50\". Lines starting with # are notes.\n\n"
+            + "The estimates appear under Operations → AI usage, on the settings test's line, and in the eval "
+            + "tool's report. A model missing from the list is shown as unpriced, never as free, and a line that "
+            + "cannot be read is refused rather than skipped. The portal never fetches a price: when the provider "
+            + "changes one, change it here, and every day in the window is restated at the new price. Blank means no "
+            + "estimate anywhere, and the daily spend budget below has nothing to measure against.",
+            Why: "A bill arrives a month after the calls. A price list the portal applies as the calls happen is how "
+                 + "an operator sees the month coming rather than finding it out.",
+            Example: "gemini-3.6-flash 0.30 2.50"),
+
+        new("settings." + Ai.AiPrices.BudgetKey,
+            "The most the AI features may cost in a UTC day at the saved prices; blank or 0 is no budget.",
+            "Measured against today's rows at the prices above, and checked after the daily call limit: once the "
+            + "day's estimate reaches it, every further call is refused with \"The daily AI spend budget is reached\", "
+            + "a queued job is skipped rather than kept, and the count starts again at midnight UTC. Only a priced "
+            + "model counts — a model with no price adds nothing to the estimate, so a budget with no prices saved "
+            + "never trips. The call limit still applies on its own.\n\n"
+            + "The estimate uses the provider's own token counts and your prices, not the provider's invoice: a "
+            + "cached prefix is counted at full price, so the estimate errs high rather than low.",
+            Why: "A call limit caps how many times the model is asked; a budget caps what asking costs, which is "
+                 + "what a long board of entrants or a dear model actually moves. Both are cheaper than the bill.",
+            Example: "5"),
+
+        new("settings." + Ai.AiRetention.Key,
+            "How many days an AI call's prompt and answer stay readable in Admin → Activity; 0 keeps them with the row.",
+            "Every call to the model provider is a row in the activity log with what was sent and what came back: "
+            + "the prompt, which carries a member's brief, profile or note as it was sent, and the draft that "
+            + "came back. Once an hour, the two bodies of every AI row older than this many days are cleared. The "
+            + "row itself stays — who asked, when, the provider and model, the status, the time taken and the "
+            + "token count — until the activity log retention under Limits removes it.\n\n"
+            + "Thirty days is long enough to open a draft a member questions and see what the model was told. "
+            + "The bodies hold the most personal text the log has, so this is shorter than the log's own "
+            + "retention and should stay so. The sweep runs whether or not AI automation is on: rows from before "
+            + "it was turned off are the ones most worth clearing.",
+            Why: "A prompt is a copy of what a member wrote, kept on a server they have never heard of beside the "
+                 + "provider's copy. Keeping it only as long as a question about the draft could arrive is what the "
+                 + "privacy policy can honestly promise."),
+
+        new("settings." + Ai.AiFeatureModels.Key,
+            "A different model for a feature: one feature per line, named as the AI usage page names it, then the model.",
+            "Every feature asks the active setup's model unless a line here names another for it — "
+            + "\"categorySuggestion gemini-3.6-flash-lite\". The names are the switches' own, as Operations → AI usage "
+            + "lists them: categorySuggestion, briefCoach, requirementsSuggestion, "
+            + "milestoneExtraction, criteriaSuggestion, seoMetadata, profileSummary, projectApproach, entryDigest, "
+            + "progressNarrative, standingNotes, profileReview, applicationEvaluation, recommendedMatching. Lines "
+            + "starting with # are notes; a line that cannot be read, or names a feature the portal does not have, "
+            + "is refused rather than skipped.\n\n"
+            + "The inline tools — the ones a member presses and waits for — are where a quicker, cheaper model "
+            + "earns its place; the long reads (a digest, the standing notes) keep the stronger one. The list "
+            + "applies to the active setup: a standby answers with its own model, since a model named for one "
+            + "provider is not one the other offers. Run the eval set against a model before naming it here, "
+            + "and give it a price under Model prices so the usage panel can cost it.",
+            Why: "One model for everything means the quick tools pay for the long reads' strength. Naming a "
+                 + "quicker model where quickness is what is wanted is the cheapest speed-up the AI features have.",
+            Example: "categorySuggestion gemini-3.6-flash-lite"),
+
+        new("settings." + Ai.EvalSettings.EnabledKey,
+            "Whether the eval tool may run at all. Off, it stops before anything is sent.",
+            "The tool (tests/WinnersPortal.AiEvals in the source) reads this switch from the portal's database "
+            + "before it reads the key, and runs only while it is on. Off is the state to leave it in between "
+            + "runs: a key saved below then spends nothing until somebody turns this on, runs, and turns it off "
+            + "again. The portal's own AI switch under AI automation has no say over it, in either direction.\n\n"
+            + "A dry run (--dry-run), which builds every prompt and sends nothing, is let through regardless, as "
+            + "is a run typed with --no-settings, which never reads the portal and so cannot see this switch — "
+            + "that is the one way round it, and it shows in the shell's history.",
+            Why: "The eval key is a real key with a real bill, and the tool is one command away on every developer's "
+                 + "machine. A switch an operator holds is what makes a run a decision rather than an accident."),
+
+        new("settings." + Ai.EvalSettings.ProviderKey,
+            "Which provider the eval tool scores the prompts against. Blank means WP_EVAL_PROVIDER, else Google Gemini.",
+            "An eval is a fixed set of example inputs, each with what a good answer must and must not contain, "
+            + "run through the portal's own prompts and scored. The eval tool (tests/WinnersPortal.AiEvals in the "
+            + "source) runs it by hand from a developer's machine; the portal itself never reads this setting. "
+            + "The tool reads it from this portal's database, using the keys folder beside the API.\n\n"
+            + "What is saved here wins. The WP_EVAL_PROVIDER variable in the shell that runs the tool is used "
+            + "only while this is blank, and a --provider typed for one run wins over both. The model is the "
+            + "provider's default unless the run names one with --model.",
+            Why: "Scoring the prompts against the provider the portal uses is what makes a passing run mean "
+                 + "something. Scoring against another one is how you find out, before switching, whether it "
+                 + "would do as well.",
+            Example: "Google Gemini"),
+
+        new("admin.aiUsage",
+            "What the AI features have cost: today and the last thirty days, by feature and by model.",
+            "Every call a model answered is counted on the day's row for its feature and model, with the tokens "
+            + "the provider reported — sent and answered — and this page adds the rows up: the two totals, then "
+            + "the window by feature (spelled as its switch under AI automation; settingsTest is the settings "
+            + "screen's test button) and by model, busiest first. Dollars appear only where Model prices under AI "
+            + "automation name the model; a row on which any model is unpriced shows no estimate rather than a "
+            + "low one, and the unpriced models are listed under the tables. A call the provider never ran — a "
+            + "429, a 5xx, the pause — is not here; an answer cut off at the token budget is, because it was "
+            + "billed. The daily budget and the call limit are shown for the day's totals to be read against.",
+            Why: "The bill names the month; this names the feature and the model, which is what an operator can "
+                 + "change — switch a feature off, pick a cheaper model, lower a cap — before the bill arrives."),
+
+        new("settings." + Ai.EvalSettings.ApiKeyKey,
+            "The eval tool's own API key, for the eval provider. Stored encrypted and never shown again.",
+            "A key of its own, not the one under AI automation: a run makes around a hundred calls, and they "
+            + "should neither use up the portal's daily call limit nor share its bill. Create it at the provider's "
+            + "developer console, and set a spending limit there if the provider offers one.\n\n"
+            + "What is saved here wins. The WP_EVAL_API_KEY variable in the shell that runs the tool is used "
+            + "only while this is blank. The tool never prints the key; it says only where the key came from.",
+            Why: "Anyone holding the key can spend on it. Keeping the evals on their own key means a run can be "
+                 + "paid for, capped and revoked without touching the features members use."),
+
+        new("settings." + Ai.EvalSettings.MaxCallsKey,
+            "The most calls one eval run may make, judge calls included — the run's own spend cap.",
+            "A run scores every case under evals/, and a case with a rubric costs two calls: one for the answer "
+            + "and one for the judge. The tool stops at this number and marks the cases it did not reach, so a "
+            + "run can never spend more than you meant it to. What is saved here wins; --max-calls typed for one "
+            + "run wins over it, and the WP_EVAL_MAX_CALLS variable fills in only while this is blank.",
+            Why: "The eval key is a real key with a real bill. A cap the tool reads from the portal is one every "
+                 + "developer's run obeys, not one each remembers to type.",
+            Example: "100"),
+
+        new("settings." + Ai.EvalSettings.TimeoutKey,
+            "How long one eval call may take before the tool gives up on it.",
+            "Per call, with the tool's single retry on a 429 or a 5xx on top. A case whose call times out is "
+            + "scored as failed with that reason, so a slow model shows up in the report rather than hanging the "
+            + "run. The portal's own call timeout under AI automation is separate: this one governs only the tool.",
+            Why: "An eval that hangs on one case is an eval nobody waits for. A bound keeps a run to a known length.",
+            Example: "100"),
 
         new("settings.ai.features.profileSummary",
             "Drafts a member’s About from the rest of their profile form, on request.",
@@ -486,7 +695,7 @@ public static class HelpRegistry
             "Mailgun: a private API key, or a domain sending key limited to the sending domain below — the "
             + "narrower one is the better choice. It is sent as a login with the user \"api\".\n\n"
             + "Brevo: an API key from SMTP & API → API keys — it starts xkeysib-. The SMTP key on the same page "
-            + "(xsmtpsib-) is a relay password, not an API key, and Brevo refuses it here. If Brevo's Authorised "
+            + "(xsmtpsib-) is a relay password, not an API key, and Brevo refuses it here. If Brevo's Authorized "
             + "IPs setting is on, add this server's outbound address there too, or every send is refused as "
             + "unauthorised.",
             Why: "Anyone holding it can send mail as your domain at your expense, and read what the account has sent "
@@ -536,7 +745,8 @@ public static class HelpRegistry
             "SMTP only: the username to sign in with. Leave blank if the server does not require it.",
             "On Brevo's relay (smtp-relay.brevo.com, port 587) it is the Login shown under SMTP & API → SMTP — "
             + "often an address ending @smtp-brevo.com rather than the account's own email. Spaces around it are "
-            + "dropped when it is saved.",
+            + "dropped when it is saved. If Brevo's Security → Authorized IPs list is on, this server's public IP "
+            + "address must be on it, or the sign-in is refused as \"Unauthorized IP address\" whatever the Login.",
             Why: "Development mail catchers accept anonymous sending; nearly every production provider does not."),
 
         new("settings.email.smtpPassword",
@@ -637,12 +847,16 @@ public static class HelpRegistry
         // ---------------------------------------------------------------
         new("settings.setups.identity",
             "Several verification providers or keys. One is active at a time, and every verification runs through it.",
-            "Each setup is one provider account: its API key, the workflow it runs and the secret its webhooks are "
-            + "signed with. Only one setup is active at a time — switching one on switches the others off — and "
-            + "every member who verifies goes through it. Verdicts already recorded stay recorded whichever "
-            + "setup is active.\n\n"
-            + "Test Didit proves one setup at a time, active or not: the key is accepted, the workflow id is "
-            + "well-formed, and the secret is set. " + SetupBadge,
+            "Each setup is one provider account — Didit (its API key, the workflow it runs and the secret its "
+            + "webhooks are signed with) or Shufti Pro (its client ID and secret key). Only one setup is active "
+            + "at a time — switching one on switches the others off — and every member who starts a "
+            + "verification goes through it. Verdicts already recorded stay recorded whichever setup is active, "
+            + "and a verification a member started before a switch is still read, and its webhooks still "
+            + "accepted, through any setup of the provider it started with. A member who returns to an "
+            + "unfinished one after a switch starts again with the active provider.\n\n"
+            + "Test provider proves one setup at a time, active or not: the key is accepted, and for Didit the "
+            + "workflow id is well-formed and the webhook secret is set. Every call to either provider, and "
+            + "every webhook from it, is recorded in the activity log as a third-party row. " + SetupBadge,
             Why: "The active setup is sent a member's name and email so the provider can address them, and the "
                  + "member then hands the provider their identity document directly. Only make a setup active "
                  + "whose provider's terms you accept for that."),
@@ -660,9 +874,12 @@ public static class HelpRegistry
                  + "sentence in the terms, not before."),
 
         new("settings." + Identity.IdentityKeys.Provider,
-            "Which verification service runs the check. Didit is the one the portal knows today.",
-            "Didit runs a hosted flow — the member is sent to the provider's page, photographs an identity "
-            + "document and their face, and is sent back — and tells the portal the verdict by a signed webhook. "
+            "Which verification service runs the check: Didit or Shufti Pro.",
+            "Both run a hosted flow — the member is sent to the provider's page, photographs an identity "
+            + "document and their face, and is sent back — and tell the portal the verdict by a signed webhook. "
+            + "Didit runs the workflow you build in its console. Shufti Pro is asked, on each request, for a "
+            + "document (ID card, passport or driving licence, read by OCR) and a selfie matched to it, with the "
+            + "member choosing the document's country. "
             + "The portal keeps the verdict and, as proof, the provider's whole decision and copies of the "
             + "document and selfie images in its own file storage, for administrators to read on the member's "
             + "Users page.",
@@ -671,8 +888,10 @@ public static class HelpRegistry
                  + "policy that identity documents are kept, before you point members at it."),
 
         new("settings." + Identity.IdentityKeys.ApiKey,
-            "The provider's API key. Stored encrypted and never shown again.",
-            "In the Didit console: your application's API key under its settings. Once saved it is encrypted "
+            "Didit's API key, or Shufti Pro's secret key. Stored encrypted and never shown again.",
+            "In the Didit console: your application's API key under its settings. In Shufti Pro's back "
+            + "office: the secret key under Settings → API Keys, which also signs its callbacks, so no separate "
+            + "webhook secret is needed. Once saved it is encrypted "
             + "with the portal's data-protection keys; the settings screen will only ever tell you whether a key "
             + "is set, never what it is. Didit's first 500 checks in a month are free and there is no minimum, "
             + "but confirm the current terms before you rely on that.\n\n"
@@ -680,6 +899,17 @@ public static class HelpRegistry
             Why: "Without a valid key no verification can start, and every door that requires one stays shut — "
                  + "the member is told the portal cannot verify anyone right now. Treat the key as a secret; "
                  + "anyone holding it can open sessions billed to your account."),
+
+        new("settings." + Identity.IdentityKeys.ClientId,
+            "Shufti Pro's client ID. Sent with the secret key to sign in; not a secret on its own.",
+            "In Shufti Pro's back office, Settings → API Keys: the client ID beside the secret key. The two go "
+            + "together as the sign-in on every call — opening a verification, reading its status, fetching its "
+            + "images. Didit has no client ID and does not show this field.\n\n"
+            + "Shufti Pro is told where to send its verdict on each request: this portal's API address (the API "
+            + "URL under Branding, or the Web URL when that is blank) plus /api/webhooks/identity/shufti. Nothing "
+            + "needs setting in its back office for that, but the address must be reachable from the internet.",
+            Why: "Without the client ID Shufti Pro refuses every call as unauthorized, and no member can start. "
+                 + "The test says so before a member finds out."),
 
         new("settings." + Identity.IdentityKeys.WorkflowId,
             "The Didit workflow every member runs: which checks, in which order. A UUID from the console.",
@@ -736,7 +966,11 @@ public static class HelpRegistry
             + "is active at a time — switching one on switches the others off — and every claimed milestone of a "
             + "opportunity that requires Docker Compose is built on it. A build already handed to a host finishes there.\n\n"
             + "Test build host asks the agent for its health — Docker, Compose, free disk, whether a build is "
-            + "running, how many previews are up and which domain it serves them under — and builds nothing. " + SetupBadge,
+            + "running, how many previews are up and which domain it serves them under — and builds nothing. " + SetupBadge + "\n\n"
+            + "Builds are on only while the active setup's last test passed and nothing has changed since. Until then "
+            + "— no setup switched on, never tested, a failed test, or any field saved after the test — the opportunity "
+            + "form does not offer Docker Compose, the progress board shows no builds, no previews and no Builds line "
+            + "in a standing, and nothing new is handed to the host. Builds already queued wait and go once a test passes.",
             Why: "The active host is handed each entrant's repository with a short-lived token to clone it, and runs "
                  + "the entrant's build there. Give it a server of its own, never the portal's: a build runs a "
                  + "stranger's code."),
@@ -846,7 +1080,9 @@ public static class HelpRegistry
             + "Leave it empty and the portal has no policy: the join form links the terms alone and the /privacy "
             + "page says none is published. That is the honest default — a stock policy would describe somebody "
             + "else's portal.\n\n"
-            + "If AI features send entrant code to an external provider, say so here as well as in the terms.",
+            + "While AI automation is on, what members type — briefs, profiles, notes on entries — is sent to the "
+            + "model provider to draft from: say so here, and name the provider. The AI automation group warns "
+            + "while this policy does not mention AI. If entrant code is sent too, say that as well as in the terms.",
             Why: "Several jurisdictions require this document before you collect an email address, and the join "
                  + "form links it beside the terms, so an empty one is visible to everybody who signs up."),
 
@@ -926,13 +1162,13 @@ public static class HelpRegistry
                  + "new lines harder to find. Shorten it on a busy portal; lengthen it where members visit rarely."),
 
         new("settings.limits.slowQueryMs",
-            "Database commands this slow or slower are logged and listed under Operations. 0 turns it off.",
+            "Database commands this slow or slower are logged and listed under Operations → Slow queries. 0 turns it off.",
             "Each one is written to the API's log as a warning, with its SQL and the request it served, and "
-            + "tallied under Admin → Operations → Slow queries, one row per query in the code. The SQL carries "
+            + "tallied under Operations → Slow queries, one row per query in the code. The SQL carries "
             + "placeholders where the values went, never a member's data.\n\n"
-            + "A saved value is in force within a few seconds, with no restart, and the Operations tally starts "
+            + "A saved value is in force within a few seconds, with no restart, and the Slow queries tally starts "
             + "again from that moment so every row it shows was counted under the same threshold. To find the "
-            + "queries worth tuning, lower it to 100 for a day of ordinary use, read Operations, then put it back.",
+            + "queries worth tuning, lower it to 100 for a day of ordinary use, read Slow queries, then put it back.",
             Why: "Too low and ordinary queries bury the slow ones — and the log grows with every page view. Too high "
                  + "and a query that makes every page drag never shows. 500 ms is about where a person notices.",
             Example: "100"),
@@ -942,10 +1178,10 @@ public static class HelpRegistry
             "Background work is what the API does on its own schedule rather than for a page somebody opened: "
             + "sending the email and push outboxes, setting up GitHub repositories, AI drafts, writing and pruning "
             + "the activity log, the daily merit snapshot. Its commands serve no request, so the log and "
-            + "Admin → Operations → Slow queries say they ran during background work.\n\n"
-            + "Off, those commands are neither logged nor tallied, however slow, and Operations lists only the "
+            + "Operations → Slow queries say they ran during background work.\n\n"
+            + "Off, those commands are neither logged nor tallied, however slow, and Slow queries lists only the "
             + "queries a person waited on. A change is in force within a few seconds, with no restart, and the "
-            + "Operations tally starts again from that moment.",
+            + "Slow queries tally starts again from that moment.",
             Why: "A worker's batch can be slow with nobody waiting for it, and a busy outbox can fill the list and "
                  + "push out the queries that make pages drag. Leave it on to see everything; turn it off while you "
                  + "look for what slows pages down."),
@@ -977,8 +1213,9 @@ public static class HelpRegistry
             + "that in its own memory and needs no Redis at all, which is why this is off by default and a portal "
             + "that never opens this group loses nothing.\n\n"
             + "Read once, when the API starts. A change here waits for the next restart of the API, and the group "
-            + "shows Restart pending until then. The deployment can pin it instead, as WP_REDIS_ENABLED; the older "
-            + "REDIS_URL, which the compose file sets, switches it on with that address.",
+            + "shows Restart pending until then. The deployment can give it instead, as WP_REDIS_ENABLED; the older "
+            + "REDIS_URL, which the compose file sets, switches it on with that address. Either applies only while "
+            + "nothing is saved here: a value saved on this screen wins, off included.",
             "Switched on with no address, or one that does not answer, the API runs as if this were off and says so "
             + "in its log. While a Redis it was started with is down, pages still load but no opportunity board is live.",
             "off"),
@@ -990,7 +1227,7 @@ public static class HelpRegistry
             + "data is stored in it: it carries messages between processes and nothing else.\n\n"
             + "Read once, when the API starts, like the switch above.",
             "A password typed here is stored as it is and shown on this screen to any administrator. Where that "
-            + "must not be, pin the address from the environment instead (WP_REDIS_URL), and the field shows as locked.",
+            + "must not be, give the address from the environment instead (WP_REDIS_URL) and leave this field blank.",
             "cache:6379"),
 
         // ---------------------------------------------------------------
@@ -1066,10 +1303,59 @@ public static class HelpRegistry
         // Phase two — forms, not settings. Same coverage rule: these fields
         // cost money, feed an integration, or cannot be undone.
         // ---------------------------------------------------------------
+        new("opportunity.kind",
+            "How the opportunity pays: a competition with one winner, or one hired freelancer paid milestone by milestone.",
+            "Competitive: the applicants you select all build in parallel, you review every entry after the "
+            + "deadline, announce one winner and pay them the award. The others are paid nothing.\n\n"
+            + "Paid by milestone: you hire one applicant and nobody else builds. They work through the milestones "
+            + "in order and hand each one in; you review it, approve it or ask for changes, pay its amount "
+            + "directly and mark it paid — and only then does the next milestone open. The last payment "
+            + "completes the award, and the repository transfers to you then. You can read the work as it "
+            + "grows throughout.",
+            Why: "Frozen at publish with the rest of the terms: a freelancer decides whether to apply on this. "
+                 + "A competition asks for unpaid work from many; paying by milestone asks you to pay as you "
+                 + "go, and suits a job you already know you want built."),
+
+        new("opportunity.milestoneAmounts",
+            "What each milestone pays, paid by milestone. Together they must be exactly the total.",
+            "Each milestone is paid on its own once you approve it, so its amount is what the freelancer earns "
+            + "for handing that step in. Weight them by the work each takes — a first milestone that only sets "
+            + "the project up should not carry a third of the budget. The form shows how much of the total is "
+            + "allocated; publishing refuses until every milestone has an amount and they add up to the total. "
+            + "Spread evenly fills the rest in equal parts, and the AI draft can suggest a split.",
+            Why: "The amounts are the payment schedule the freelancer accepts when you hire them, and they are "
+                 + "frozen at publish. Your record shows how quickly you pay each approved milestone."),
+
+        new("opportunity.hire",
+            "Hiring on an opportunity paid by milestone: you choose one applicant, and the opportunity is filled.",
+            "Selecting an application here hires that freelancer. They are told, a private repository is set up "
+            + "for them where the opportunity uses one, and everyone still waiting hears that the job was filled. "
+            + "You can take a hire back only before any work has arrived — a push, a milestone or a file — and "
+            + "the opportunity is then open to hire again.\n\n"
+            + "With GitHub connected, you can read the repository from the start: each milestone is reviewed "
+            + "there before you pay for it. Connect your GitHub account before hiring.",
+            Why: "A hire is a promise of every milestone's payment as it is approved. The freelancer's payout "
+                 + "details become visible to you once you hire them."),
+
+        new("opportunity.milestonePayments",
+            "Each milestone handed in waits on you: approve it or ask for changes, then mark it paid once you have paid.",
+            "Handed in: the freelancer claimed the milestone — a tag, a pull request or a file tagged with it — "
+            + "and you are emailed. Read the work, then Approve, or Ask for changes with a sentence they can act "
+            + "on; they hand it in again when it is done. Once approved, pay its amount directly (the portal holds "
+            + "no money) and choose Mark paid: that opens the next milestone for them. Mark paid on a milestone "
+            + "you have not approved approves it too.\n\n"
+            + "The last payment completes the award: the repository transfers to your connected GitHub account "
+            + "and both of you can rate the other. You may cancel the job while no milestone is waiting on you; "
+            + "what was paid stays paid.",
+            Why: "The freelancer is never more than one milestone ahead of their pay, and you never pay for a "
+                 + "milestone you have not seen. How quickly you pay an approved milestone shows on your public "
+                 + "payment record."),
+
         new("opportunity.awardAmount",
             "The fixed amount the winner is paid. Entrants commit real days against this number.",
             "There is no bidding on this platform: you set one award, freelancers decide whether the work is worth it, "
-            + "and the winner is paid exactly this amount after you review their code.\n\n"
+            + "and the winner is paid exactly this amount after you review their code. Paid by milestone, it is "
+            + "the total of the job, and the milestones' amounts must add up to it.\n\n"
             + "Set it for the work you are asking, not the minimum the form accepts — the award is the only thing "
             + "competing for entrants' time against every other open opportunity.",
             Why: "This is a public commitment. It is shown on every card in the feed, it cannot be lowered after "
@@ -1233,8 +1519,8 @@ public static class HelpRegistry
 
         new("opportunity.minMerit",
             "The merit score an entrant needs to enter, out of 100. Zero — the default — is no minimum.",
-            "The merit score is the portal's own reading of a freelancer: thirty points for what they wrote "
-            + "about themselves, seventy for what they did here — opportunities entered, milestones met on time, "
+            "The merit score is the portal's own reading of a freelancer: twenty-five points for what they wrote "
+            + "about themselves, seventy-five for what they did here — opportunities entered, milestones met on time, "
             + "awards won, ratings from clients. A floor of 25 asks for a written profile or one finished "
             + "opportunity; 50 asks for a record here; 75 asks for a proven one. Somebody short of it cannot enter "
             + "and is told the number they have and the number they need.\n\n"
@@ -1272,18 +1558,21 @@ public static class HelpRegistry
                  + "the list is fixed at publish."),
 
         new("profile.merit",
-            "One number for how much a client can lean on what they are reading — 30 written, 70 earned.",
-            "The portfolio half is self-reported and caps at 30, because anyone can type anything and a "
-            + "score you could max out in an afternoon would be worth nothing. The other 70 is earned "
+            "One number for how much a client can lean on what they are reading — 25 written, 75 earned.",
+            "The portfolio half is self-reported and caps at 25, because anyone can type anything and a "
+            + "score you could max out in an afternoon would be worth nothing. The other 75 is earned "
             + "here: opportunities entered, milestones met on time, awards won, ratings from the other side "
             + "of finished deals.\n\n"
             + "Every point has a line in the breakdown saying what it was for, and both halves are "
-            + "visible to anyone who can see your profile. Volume flattens on purpose — entering "
-            + "everything is not a strategy, and one five-star rating is not a reputation.",
-            Why: "It decides nothing. It does not gate entry, cap an award or pick a winner — the client "
-                 + "picks the winner by reading the code. Its written half is one part, and the smallest, of "
-                 + "the standing score an opportunity board is ordered by. Treat it as a reading aid, and be "
-                 + "suspicious of anyone who treats it as a verdict."),
+            + "visible to anyone who can see your profile. Volume flattens on purpose — entries stop "
+            + "counting at ten and wins at four, because entering everything is not a strategy. Milestones "
+            + "on time are a share of the dated milestones claimed or already due, so a new entry is never "
+            + "a miss. Ratings are worth their star average, up to five points.",
+            Why: "It picks no winner and caps no award — the client picks the winner by reading the work. "
+                 + "It shuts a door only where a client set a minimum merit score on their opportunity, and it "
+                 + "orders the leaderboard unless another figure is picked there. On an opportunity's own board "
+                 + "its written half is one part, and the smallest, of the standing the entrants are ordered by. "
+                 + "Treat it as a reading aid, and be suspicious of anyone who treats it as a verdict."),
 
         new("profile.about",
             "A picture, a professional title and an About — what a client reads before they open your code.",
@@ -1347,11 +1636,11 @@ public static class HelpRegistry
                  + "there are."),
 
         new("profile.skills",
-            "The skills you would be hired for. Six named well say more than twenty listed.",
+            "The skills you would be hired for. Five named well say more than twenty listed.",
             "Each carries a level — beginner, intermediate, advanced, expert — and how long you have "
             + "used it. Beginner is used it and still learning it; intermediate ships production work "
             + "with it; advanced ships the hard parts unsupervised; expert is the person others ask.\n\n"
-            + "The merit score counts the first six, deliberately: a keyword dump is not a portfolio, "
+            + "The merit score counts the first five, deliberately: a keyword dump is not a portfolio, "
             + "and rewarding one would fill the portal with them. The names under the list are "
             + "suggestions for the kinds of work you chose — this portal's spelling of them, so one "
             + "skill is one name across every profile."),
@@ -1457,7 +1746,7 @@ public static class HelpRegistry
                  + "where a client reads the work behind the figures."),
         new("leaderboard.rankBy",
             "Which figure orders the board. Equal figures share a rank, and the next takes the place after them.",
-            "MeritScore is the number out of 100 \u2014 30 for what a member wrote, 70 for what they earned here. "
+            "MeritScore is the number out of 100 \u2014 25 for what a member wrote, 75 for what they earned here. "
             + "Rating is the star average from clients after paid awards; among equals, more ratings come first. "
             + "Delivery is dated milestones met on time as a share of those faced; among equals, more milestones "
             + "come first. Wins is opportunities won.\n\n"
@@ -1470,8 +1759,9 @@ public static class HelpRegistry
         new("leaderboard.delivery",
             "Dated milestones claimed on or before their date, as a share of the dated milestones faced.",
             "Counted across every active entry, the same way the merit score\u2019s punctuality points count. A "
-            + "milestone with no date cannot be met late or on time, so it is not in the count, and a member who "
-            + "has faced no dated milestone yet shows a dash rather than a nought.",
+            + "dated milestone is faced once it is claimed or its date has passed, so one not yet due is never "
+            + "a miss. A milestone with no date cannot be met late or on time, so it is not in the count, and a "
+            + "member who has faced no dated milestone yet shows a dash rather than a nought.",
             Why: "Reliability is the figure a client asks for first, and it is the one a profile cannot claim: "
                  + "every point of it was stamped by a webhook or an upload against a date the client set."),
         new("leaderboard.trend",
@@ -1602,7 +1892,8 @@ public static class HelpRegistry
             + "before the deadline too, never the code — and after the deadline the final version of each entry.\n\n"
             + "Leave it off for work that is not a running program — a library, a command-line tool, a mobile app, a "
             + "design — or the compose file is a hoop with nothing behind it. Only with a repository delivery, and "
-            + "the builds run only once an administrator has set up the build host under Settings.",
+            + "only offered while the portal's build host is switched on and has passed its test: until an "
+            + "administrator has set one up under Settings, the option is not shown at all.",
             Why: "Frozen at publish with the rest of the terms: entrants decide whether to enter on it, and a repository "
                  + "without a compose file shows Build failed on every claim. Ask for it only where the work genuinely runs."),
 
@@ -1663,6 +1954,30 @@ public static class HelpRegistry
             + "Withdrawn application, and to the portal's administrators.",
             Why: "Withdrawal is immediate and cannot be undone. If you are only stuck, keep the entry — an "
                  + "unfinished entry costs you nothing, but a withdrawal cannot win."),
+
+        new("chat.messages",
+            "A private conversation between an opportunity's client and one of its entrants.",
+            "Every entry opens one: the client can message each entrant, and an entrant the client of each "
+            + "opportunity they entered or were selected for. The conversation stays open while the entry is active "
+            + "— through the build, the review and after the award — and closes when the entry is withdrawn, removed, "
+            + "deselected or the opportunity is cancelled; what was said stays readable to both. Messages reach the "
+            + "other side the moment they are sent, in the panel at the corner of every page and on the Messages "
+            + "page, which keeps the whole history. Nothing here is emailed or pushed.",
+            Why: "Questions about a brief used to have nowhere to go but outside the portal, where nothing about the "
+                 + "opportunity is at hand. Keeping them here keeps the answer beside the entry it is about — and keeps "
+                 + "a client from having to hand out an email address to every entrant."),
+
+        new("chat.report",
+            "Report a conversation when something in it is wrong — abuse, a scam, something offensive.",
+            "The flag at the top of a conversation opens the report: choose why, and add a few words — needed "
+            + "when the reason is something else. The portal reviews it, and you are emailed once it has been "
+            + "reviewed. The other side is not told you reported it. One report at a time: while yours is "
+            + "being reviewed the flag says so, and once it has been you can report the conversation again if "
+            + "something new comes up. A conversation needs something said in it before it can be reported, and "
+            + "a closed one can still be reported — what was said stays.",
+            Why: "Most conversations need nothing but the two of you. When one goes wrong — threats, a request for "
+                 + "a card number, pressure to take the work somewhere unsafe — reporting it here puts it in front of "
+                 + "the people who can act, with the conversation itself as the record."),
 
         new("entry.claimMilestone",
             "Claim a milestone from inside your repo: push a tag m1, m2, … or open a pull request.",
@@ -1903,6 +2218,11 @@ public static class HelpRegistry
             + "deadline itself, and the hundred percent of the work is split evenly between them. Set the "
             + "deadline before you draft and the dates come with it; draft without one and only the shares are "
             + "filled in.\n\n"
+            + "Paid by milestone, the model also reads the total above and splits it: each milestone comes with "
+            + "an amount in proportion to the work it takes, adding up to the total, and each is drafted as "
+            + "something you can accept on its own. That split is the model's suggestion, not a price it knows — "
+            + "change any amount before you publish. Set the total first; without one the milestones come back "
+            + "with no amounts.\n\n"
             + "One call per press, and the button waits until something it read has changed before it will "
             + "read again. It takes a few seconds, and the button says so while it works.",
             Why: "The milestone list becomes every entrant's progress board — the thing the webhook system tracks "
@@ -2007,11 +2327,12 @@ public static class HelpRegistry
             + "ratings left by past winners.\n\n"
             + "'Median days to pay' is the middle payment, so one slow dispute does not drown five same-day "
             + "payments. An award showing unpaid for weeks is the strongest signal here — the portal surfaces "
-            + "the oldest one's age rather than hiding it in an average.",
+            + "the oldest one's age rather than hiding it in an average.\n\n"
+            + "Each part appears only once there is something to show: the figures after the client's first "
+            + "announced award, the stars after a winner rates them. A client with neither shows just their name.",
             Why: "There is no deposit on this portal — entrants build first and are paid on the client's word. "
                  + "This record is the counterweight: a client who leaves awards unpaid carries that history "
-                 + "into every opportunity they post. A brand-new client has no record yet, which is itself worth "
-                 + "knowing before you commit a week of work."),
+                 + "into every opportunity they post."),
 
         new("register.role",
             "Clients post opportunities and pay awards; freelancers enter and build. Pick the side you are here for.",
@@ -2366,18 +2687,81 @@ public static class HelpRegistry
         // Activity — what everybody did, for an administrator to read back
         // ---------------------------------------------------------------
         new("admin.database.test",
-            "Proves a database before anything is staked on it: reachable, new enough, full-text where it matters, and empty.",
-            "The connection string is the whole address: for SQL Server, Server (host, or host,port), Database, "
-            + "User Id and Password — or Integrated Security=True for the service's own account — and "
-            + "TrustServerCertificate=True where the server's certificate is self-signed, which a container's is; "
-            + "for PostgreSQL, Host, Port, Database, Username and Password. SQL Server must be 2022 or later with "
-            + "Full-Text Search installed; the test says which is missing.\n\n"
-            + "Empty means no tables, or only the portal's own with no account, setting or opportunity in them — what a "
-            + "move that failed leaves, and may be tried against again. A SQL Server database that does not exist "
-            + "yet passes too: the move creates it. A PostgreSQL one has to exist first, because creating it is "
-            + "the operator's choice of owner and encoding.",
-            Why: "A move copies into whatever the string names. Testing first is how a typo does not become a move "
-                 + "onto the wrong server."),
+            "Proves a database before anything is staked on it: reachable, new enough, full-text, and what it holds.",
+            "The fields are the whole address: the server and port, the database, and how to sign in — a SQL "
+            + "login and its password, or Windows for the account the API runs as. The test connects with exactly "
+            + "those fields and saves nothing. SQL Server must be 2022 or later with Full-Text Search installed; "
+            + "the test says which is missing, and quotes the server when it refuses.\n\n"
+            + "Then what is in it. Empty means no tables, or only the portal's own with no account, setting or "
+            + "opportunity in them — what a move that failed leaves — and is where a move may go. A SQL Server "
+            + "database that does not exist yet counts as empty: the portal creates it. A PostgreSQL one has to "
+            + "exist first, because creating it is the operator's choice of owner and encoding. This portal's "
+            + "data is recognised by its secret settings opening with the keys here: that is the database to "
+            + "save onto after a new password or a new host, and the test compares it with the one in use so "
+            + "an older copy is not taken for the current one.",
+            Why: "Whatever the fields name is what the portal will write to. Testing first is how a typo does not "
+                 + "become a move onto the wrong server, or a save onto someone else's data."),
+
+        new("admin.database.connection",
+            "Where the portal reaches its database: edit it for a new password or host, or move to an empty database.",
+            "The fields start as the connection in use, its password never shown. Test connection says what the "
+            + "edited fields reach, and that decides what may be done. This portal's own data — the same database "
+            + "with a new password, the same data on a new host, a restored copy — is saved onto: the portal "
+            + "pauses for a moment, the connection is written to database.json beside the keys, and the API "
+            + "restarts on it. An empty database is moved into instead, which copies everything first. Another "
+            + "portal's data, or another application's tables, is refused.\n\n"
+            + "Change the password on the database server first, then here: until the restart the API keeps "
+            + "using the connection it started with. With more than one API process, each keeps the old "
+            + "connection until it restarts, so restart them all. Delete database.json to return to "
+            + "ConnectionStrings__Db, or with none set, to the setup page's connect step.",
+            Why: "Saving onto a copy that is behind leaves everything newer here unread, so the test compares the "
+                 + "two and says when the copy looks older."),
+
+        new("database.connection.server",
+            "The machine the database runs on: a name such as localhost or db.example.com, or an address.",
+            "For SQL Server a named instance goes here too (HOST\\SQLEXPRESS), and so does a protocol prefix: "
+            + "tcp:127.0.0.1 makes the connection go over the network even on this same machine. That matters "
+            + "where a SQL Server is installed locally beside a container publishing port 1433 — plain localhost "
+            + "then reaches the local one through shared memory. For PostgreSQL, several hosts separated by "
+            + "commas, each with its own :port, make a failover list.",
+            Why: "localhost and 127.0.0.1 can be two different servers on a machine that runs one natively and one "
+                 + "in Docker; the test says which one answered."),
+
+        new("database.connection.port",
+            "Blank uses the usual port — 1433 for SQL Server, 5432 for PostgreSQL — or a named instance's own.",
+            "Fill it only when the server listens elsewhere. A SQL Server named instance normally finds its port "
+            + "through the SQL Browser service, so leave it blank there unless the instance has a fixed port. A "
+            + "named pipe, shared memory or LocalDB address takes no port at all.",
+            Why: "A wrong port reads as the server being down, not as a wrong port."),
+
+        new("database.connection.authentication",
+            "A SQL login signs in with a user and password; Windows signs in as the account the API runs as.",
+            "Windows authentication (Integrated Security) is SQL Server only, and it is the account of the "
+            + "process: your own under Visual Studio or dotnet run, the service's account under the Windows "
+            + "service — never the person at this page. That account needs a login on the server with rights on "
+            + "the database, and the right to create it on the first connect. A SQL login needs SQL Server's "
+            + "mixed authentication mode turned on.\n\n"
+            + "The password is never shown back. Leave it blank to keep the current one; that works only while "
+            + "the server and the user stay the same, so the stored password is never sent to another server.",
+            Why: "Windows sign-in keeps the password out of every file; a SQL login works from anywhere, containers included."),
+
+        new("database.connection.encrypt",
+            "Encrypts the traffic between the API and the database server.",
+            "On by default, as the SQL Server driver itself defaults. Off still encrypts the sign-in but sends "
+            + "the data in the clear — only for a server on the same machine, or a private network, that cannot "
+            + "encrypt. For PostgreSQL, on means SSL Mode Require or stricter and off means Prefer, which "
+            + "encrypts when the server offers it. A stricter setting already in use (Encrypt=Strict, VerifyCA) "
+            + "is kept while the box stays ticked.",
+            Why: "The database carries every account, message and payment detail the portal holds."),
+
+        new("database.connection.trustServerCertificate",
+            "Accepts the server's certificate without checking who issued it — for self-signed certificates.",
+            "A SQL Server install, and the compose container, come with a self-signed certificate that no "
+            + "machine trusts, and an encrypted connection to one fails with a certificate-chain error until this "
+            + "is ticked. The traffic is still encrypted; what is skipped is the proof that the server is the "
+            + "one you meant. Leave it unticked for a server whose certificate comes from a real authority. For "
+            + "PostgreSQL, ticked means SSL Mode Require and unticked means VerifyFull.",
+            Why: "Ticked on a network you do not control, it lets a machine in the middle pretend to be the database."),
 
         new("admin.database.move",
             "Copies every table to another database, records the choice beside the keys, and restarts the API on it.",
@@ -2405,6 +2789,20 @@ public static class HelpRegistry
             + "restarts on it — this page waits and follows.",
             Why: "Moving now costs nothing but the restart. Moving later costs the same, plus the minute the portal "
                  + "is paused with members in it."),
+
+        new("setup.connection",
+            "Where the portal's data will live: the database server, the database, and how the API signs in to it.",
+            "Nothing named a database when the API started — no connection saved here before, and no "
+            + "ConnectionStrings__Db in its environment — so it asks. Test connection proves the fields: reachable, "
+            + "SQL Server 2022 or later with Full-Text Search, and a database that is new, empty or this portal's "
+            + "own. Connect then creates the tables and installs the stored procedures, and only if all of that "
+            + "works keeps the connection, encrypted under the API's keys in database.json beside them. The API "
+            + "then starts on it, and the wizard carries on.\n\n"
+            + "A SQL Server database that does not exist yet is created, which needs a login with the right to "
+            + "create databases; a PostgreSQL one has to exist first. Change the connection later in Admin → "
+            + "Database; delete database.json to be asked again.",
+            Why: "Nothing is guessed: a guessed localhost reaches whatever server answers there, which on a machine "
+                 + "with a SQL Server installed and another in Docker is often the wrong one."),
 
         new("admin.activity",
             "Every page opened, every action taken, and every call the portal made to another service, newest first.",
@@ -2434,6 +2832,30 @@ public static class HelpRegistry
                  + "after the fact — and it is personal data: addresses and browsing. Read it to answer a "
                  + "question, keep it as short as your questions need, and say in the privacy policy that "
                  + "it is kept."),
+
+        new("admin.conversations",
+            "Every conversation between a client and an entrant, for moderation — read-only, and every reading is logged.",
+            "The list shows every conversation with something said in it, newest message first: the opportunity, "
+            + "the client and the entrant, how many messages and when the last one was sent — never what was "
+            + "said. Type to narrow by the opportunity's title or either person's name or email address; the "
+            + "Conversations link on a member's row in Users opens their conversations only.\n\n"
+            + "Open one to read it from the start, the client's messages on one side and the entrant's on the "
+            + "other, each with when it was sent and when the other side read it. Reading here marks nothing "
+            + "read, sends nothing and tells nobody, and you cannot write in it. Every opening is a row in "
+            + "Activity — \"Read a conversation\", naming the opportunity and the two people — so who read "
+            + "which conversation can always be answered; \"Who read this\" opens those rows.\n\n"
+            + "To act on what you read, use the tools that already exist: remove the entrant from the "
+            + "opportunity (which closes the conversation), cancel the opportunity, or lock the account in Users.\n\n"
+            + "Either member can report a conversation from inside it — a reason and, if they like, their own words. "
+            + "Every administrator is emailed with a line in the bell, the dashboard lists it until it is reviewed, "
+            + "and Reported narrows this list to conversations with a report still open. Open one: its reports sit "
+            + "above the messages. Mark reviewed closes every open report on it at once, with a note for the next "
+            + "administrator to read; each reporter is emailed that it was reviewed, never what was done, and the "
+            + "other side is never told it was reported.",
+            Why: "Members are told conversations are private between the two of them, and almost always that is "
+                 + "all they need to be. Reading one is for a complaint, a dispute or a sign of abuse — and it is "
+                 + "personal data, so read only what the question needs, and say in the privacy policy that "
+                 + "administrators may read conversations for moderation."),
 
         new("admin.slowQueries",
             "Database commands at or over the slow-query threshold, one row per query in the code, the costliest in all first.",
@@ -2547,6 +2969,10 @@ public static class HelpRegistry
         "opportunity.milestones",
         "opportunity.milestoneDates",
         "opportunity.milestoneShares",
+        "opportunity.kind",
+        "opportunity.milestoneAmounts",
+        "opportunity.hire",
+        "opportunity.milestonePayments",
         "opportunity.requirements",
         "opportunity.rubric",
         "opportunity.standing",
@@ -2657,9 +3083,17 @@ public static class HelpRegistry
         "admin.resetPassword",
         "admin.database.test",
         "admin.database.move",
+        "admin.database.connection",
+        "database.connection.server",
+        "database.connection.port",
+        "database.connection.authentication",
+        "database.connection.encrypt",
+        "database.connection.trustServerCertificate",
         "admin.deleteUser",
         "admin.activity",
+        "admin.conversations",
         "admin.slowQueries",
+        "admin.aiUsage",
     ];
 
     /// <summary>

@@ -135,7 +135,9 @@ public static class JwtSettings
         var saved = await ResolveAsync(settings, ct);
         if (saved.Key is { } usable) return saved.Bind(usable);
 
-        if (SettingsService.IsLocked(SigningKeyKey))
+        // Nothing usable is saved and the deployment gave a key: the key is
+        // the operator's, so a bad one stops the start rather than being replaced.
+        if (await settings.SourceAsync(SigningKeyKey, ct) == SettingSource.Environment)
             throw new InvalidOperationException(
                 $"{SettingsRegistry.EnvVarName(SigningKeyKey)} must be base64 of at least {MinKeyBytes} bytes.");
         if (await settings.GetAsync(SigningKeyKey, ct) is not null)

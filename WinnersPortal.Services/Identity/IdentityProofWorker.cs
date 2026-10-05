@@ -112,15 +112,15 @@ public sealed class IdentityProofWorker(
 
     private async Task CopyAsync(AppDbContext db, IdentityVerification row, CancellationToken ct)
     {
-        var config = await options.ProviderConfigAsync(ct);
-        if (config is null || config.Provider != row.Provider)
+        var config = await options.ReaderForAsync(row.Provider, ct);
+        if (config is null)
         {
-            GiveUp(row, $"No active identity setup for {row.Provider} can read this decision. Switch it back on, then choose Fetch again.");
+            GiveUp(row, $"No identity setup for {IdentityProviders.LabelOf(row.Provider)} with a key is left to read this decision. Add one back, then choose Fetch again.");
             return;
         }
 
         var now = DateTimeOffset.UtcNow;
-        var decision = await client.ReadDecisionJsonAsync(config.Provider, config.ApiKey, row.SessionId, ct);
+        var decision = await client.ReadDecisionJsonAsync(config, row.SessionId, ct);
         row.DecisionJson = decision;
         row.DecisionReadAtUtc = now;
 
@@ -131,7 +131,7 @@ public sealed class IdentityProofWorker(
             .ToListAsync(ct);
         foreach (var old in previous) old.RemovedAtUtc = now;
 
-        var images = IdentityProof.Images(decision);
+        var images = IdentityProof.Images(row.Provider, decision);
         if (images.Count == 0)
         {
             Done(row);
@@ -150,7 +150,7 @@ public sealed class IdentityProofWorker(
             var image = images[i];
             try
             {
-                var (bytes, type) = await client.DownloadAsync(image.Url, IdentityProof.MaxImageBytes, ct);
+                var (bytes, type) = await client.DownloadAsync(image, IdentityProof.MaxImageBytes, ct);
                 if (!IdentityProof.Keepable(type))
                 {
                     problems.Add($"{IdentityProof.Label(image.Name)}: not an image ({type ?? "no type"})");

@@ -612,6 +612,135 @@ public static class Emails
         return sb.ToString();
     }
 
+    // ------------------------------------------------- paid by milestone
+
+    /// <summary>
+    /// To the applicant a client hired on an opportunity paid by milestone:
+    /// the job is theirs alone, the milestones are worked in order, and each
+    /// is paid on its own before the next one opens.
+    /// </summary>
+    public static EmailContent Hired(
+        string opportunityTitle, string slug, string clientName, decimal total, string currency,
+        OpportunityDelivery delivery, IReadOnlyList<(string Title, DateTimeOffset? DueUtc, decimal? Amount)> milestones,
+        string githubUsername)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"{clientName} hired you for “{opportunityTitle}”. The job is yours alone — nobody else is "
+                  + $"building it — and it pays {Money(total, currency)} in all, milestone by milestone.\n\n");
+        sb.Append("How it runs: work on milestone 1 and hand it in. The client reviews it, approves it or asks "
+                  + "for changes, pays you its amount directly (the portal holds no funds) and marks it paid here. "
+                  + "The next milestone opens only then, so you are never more than one milestone ahead of "
+                  + "your pay. The client can read your work as you go.\n\n");
+        if (delivery.HasFlag(OpportunityDelivery.Repository))
+            sb.Append("A private repository is being set up for you, and the invitation goes to the GitHub "
+                      + $"account “{githubUsername}”. Hand a milestone in by pushing a tag m1, m2, … or opening a "
+                      + "pull request from a branch named m1-…. It transfers to the client once the last "
+                      + "milestone is paid. ");
+        if (delivery.HasFlag(OpportunityDelivery.Upload))
+            sb.Append("Hand a milestone in as files on the opportunity page, tagged with its number.");
+        sb.Append("\n\nMilestones, in the order they open:\n\n");
+        for (var i = 0; i < milestones.Count; i++)
+        {
+            var (title, due, amount) = milestones[i];
+            sb.Append(i + 1).Append(". ").Append(title);
+            if (amount is { } a) sb.Append(" — ").Append(Money(a, currency));
+            if (due is { } d) sb.Append($", due by {d:yyyy-MM-dd HH:mm} UTC");
+            sb.Append('\n');
+        }
+        sb.Append("\nThe client reads where to pay you from Payout Setup on your profile, which they can see now "
+                  + "that they have hired you — if it is empty, fill it in today.");
+        return new EmailContent(
+            Subject: $"You are hired for “{opportunityTitle}” — {Money(total, currency)}, paid by milestone",
+            TextBody: sb.ToString(),
+            ActionText: "Open the opportunity",
+            ActionPath: $"/opportunities/{slug}");
+    }
+
+    /// <summary>To an applicant nobody answered when the client hired someone else: the job is taken, and it is not a no.</summary>
+    public static EmailContent ApplicationClosedByHire(string opportunityTitle) => new(
+        Subject: $"“{opportunityTitle}” was filled before your application was decided",
+        TextBody:
+            $"The client on “{opportunityTitle}” hired another freelancer, so the opportunity is no longer taking "
+            + "applications and nothing more happens to yours.\n\n"
+            + "It was not turned down, and nothing about it is held against you: your profile and your record "
+            + "here are unchanged, and every open opportunity is yours to apply to.",
+        ActionText: "Find your next opportunity",
+        ActionPath: "/");
+
+    /// <summary>To the client: a milestone is handed in, and the next move is theirs.</summary>
+    public static EmailContent MilestoneSubmitted(
+        string opportunityTitle, string slug, string freelancerName, int number, string milestoneTitle,
+        decimal? amount, string currency, bool again) => new(
+        Subject: again
+            ? $"{freelancerName} handed milestone {number} in again on “{opportunityTitle}”"
+            : $"{freelancerName} handed in milestone {number} on “{opportunityTitle}”",
+        TextBody:
+            $"{freelancerName} handed in milestone {number}, “{milestoneTitle}”"
+            + (again ? ", with the changes you asked for" : "") + ".\n\n"
+            + "Review it on the opportunity page, then approve it or ask for changes. Once it is approved, pay "
+            + (amount is { } a ? $"its {Money(a, currency)} " : "its amount ")
+            + "directly and mark it paid there: the next milestone opens for them only when you do, so the "
+            + "work waits on you until then.",
+        ActionText: "Review the milestone",
+        ActionPath: $"/opportunities/{slug}");
+
+    /// <summary>To the freelancer: the milestone is accepted, and its payment is due.</summary>
+    public static EmailContent MilestoneApproved(
+        string opportunityTitle, string slug, int number, string milestoneTitle, decimal? amount, string currency) => new(
+        Subject: $"Milestone {number} on “{opportunityTitle}” is approved",
+        TextBody:
+            $"The client approved milestone {number}, “{milestoneTitle}”.\n\n"
+            + "Its payment"
+            + (amount is { } a ? $" of {Money(a, currency)}" : "")
+            + " is due now. You will hear again when the client marks it paid, and the next milestone opens "
+            + "then. If the money reaches you before that, nothing more is needed from you.",
+        ActionText: "See the milestones",
+        ActionPath: $"/opportunities/{slug}");
+
+    /// <summary>To the freelancer: what the client wants changed, in the client's words.</summary>
+    public static EmailContent MilestoneChangesRequested(
+        string opportunityTitle, string slug, int number, string milestoneTitle, string note) => new(
+        Subject: $"Changes asked for on milestone {number} of “{opportunityTitle}”",
+        TextBody:
+            $"The client asked for changes to milestone {number}, “{milestoneTitle}”, before approving it:\n\n"
+            + $"“{note}”\n\n"
+            + "Make the changes, then hand the milestone in again: push a new tag or pull request for it, upload "
+            + "the corrected file tagged with it, or choose Hand in again on the opportunity page. Its payment "
+            + "follows the approval.",
+        ActionText: "See the request",
+        ActionPath: $"/opportunities/{slug}");
+
+    /// <summary>To the freelancer: a milestone is paid, and — unless it was the last — the next one is open.</summary>
+    public static EmailContent MilestonePaid(
+        string opportunityTitle, string slug, int number, string milestoneTitle, decimal? amount, string currency,
+        int? nextNumber, string? nextTitle) => new(
+        Subject: $"Milestone {number} on “{opportunityTitle}” is paid",
+        TextBody:
+            $"The client confirmed paying"
+            + (amount is { } a ? $" {Money(a, currency)} for" : "")
+            + $" milestone {number}, “{milestoneTitle}”.\n\n"
+            + (nextNumber is { } n
+                ? $"Milestone {n}, “{nextTitle}”, is open now — hand it in the same way when it is done. "
+                : "")
+            + "If the payment has not actually reached you, say so now: the paper trail is freshest today.",
+        ActionText: "See the milestones",
+        ActionPath: $"/opportunities/{slug}");
+
+    /// <summary>To the freelancer: the last milestone is paid, the award is complete, and the handover starts.</summary>
+    public static EmailContent MilestonesComplete(
+        string opportunityTitle, string slug, decimal total, string currency, string? handoverNote) => new(
+        Subject: $"“{opportunityTitle}” is paid in full",
+        TextBody:
+            $"The client marked the last milestone of “{opportunityTitle}” paid — {Money(total, currency)} in all.\n\n"
+            + (handoverNote is null
+                ? "The transfer of your repository to them has been requested — this closes the job out. "
+                : $"No repository transfer was started: {handoverNote} ")
+            + "If a payment has not actually reached you, say so now: the paper trail is freshest today.\n\n"
+            + "Rate working with this client on the opportunity page. Your rating and the payment record are what "
+            + "the next freelancer reads before taking a job from them.",
+        ActionText: "See the job",
+        ActionPath: $"/opportunities/{slug}");
+
     /// <summary>What the account can do, in the reader's own terms rather than the role word.</summary>
     private static string RoleLine(string role) => role switch
     {
@@ -625,6 +754,21 @@ public static class Emails
             "It is a freelancer account: you enter opportunities, build in a private repository of your own, "
             + "and are paid if the client picks your entry.",
     };
+
+    // ------------------------------------------------------ conversations
+
+    /// <summary>
+    /// To a member whose report was reviewed. Says only that it was looked
+    /// at — what was done, if anything, is not theirs to read, and may be
+    /// about the other side.
+    /// </summary>
+    public static EmailContent ChatReportReviewed(Guid entryId, string opportunityTitle, string otherName) => new(
+        Subject: $"Your report was reviewed: “{opportunityTitle}”",
+        TextBody:
+            $"The conversation with {otherName} on “{opportunityTitle}” that you reported has been reviewed.\n\n"
+            + "You can report it again if something new comes up.",
+        ActionText: "Open the conversation",
+        ActionPath: $"/messages?thread={entryId}");
 
     // ------------------------------------------------------------- admin
 
@@ -640,6 +784,25 @@ public static class Emails
             + "installation was revoked, or the entrant's username does not exist.",
         ActionText: "Open the dashboard",
         ActionPath: "/dashboard");
+
+    /// <summary>
+    /// To every administrator: a member reported a conversation. The
+    /// reporter's own words go in — the email is the report — and the link
+    /// opens the conversation, where the reading is logged.
+    /// </summary>
+    public static EmailContent ChatReported(
+        Guid entryId, string opportunityTitle, string reporterName, string reporterSide, string otherName,
+        string reasonLabel, string? details) => new(
+        Subject: $"Conversation reported: “{opportunityTitle}”",
+        TextBody:
+            $"{reporterName}, the {reporterSide}, reported their conversation with {otherName} on "
+            + $"“{opportunityTitle}”: {reasonLabel}.\n\n"
+            + (details is null ? "" : $"In their words: “{details}”\n\n")
+            + $"{otherName} is not told. Read the conversation, act if it needs it — take the entrant off, cancel "
+            + "the opportunity or lock an account — and mark the report reviewed, which tells the reporter it was "
+            + "looked at.",
+        ActionText: "Read the conversation",
+        ActionPath: $"/admin/conversations?thread={entryId}");
 
     // ------------------------------------------------------------ digest
 

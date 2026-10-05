@@ -8,6 +8,7 @@ using WinnersPortal.Api.Auth;
 using WinnersPortal.Api.Common;
 using WinnersPortal.Api.Live;
 using WinnersPortal.Api.Middleware;
+using WinnersPortal.Api.Setup;
 using WinnersPortal.Infrastructure.Data;
 using WinnersPortal.Services.Activity;
 using WinnersPortal.Services.Admin;
@@ -42,26 +43,40 @@ builder.Services.AddDataProtection()
 
 // --- database -----------------------------------------------------------
 // Which database, and where — decided before the host exists, because the
-// settings table is behind the very connection being chosen. An in-app
-// move writes its choice beside the keys and that file wins; otherwise
-// DATABASE__PROVIDER (sqlserver unless it says postgres) and the
-// connection string from the environment — a blank provider beside a
-// string only PostgreSQL reads is an install from before SQL Server was
-// the default, and stays on PostgreSQL with a warning. Development falls
-// back to the stock compose database so a bare `dotnet run` works;
-// anywhere else an unset string stops the process here naming the
-// setting — the fallback would connect to whatever answers on localhost
-// (on a box with a native server, the wrong one), and fail as a rejected
-// password once per restart the service manager makes. SQL Server 2022
-// or later is insisted on before the first migration.
-var database = DatabaseSelection.Resolve(
-    builder.Configuration, keysDir, builder.Environment.IsDevelopment(),
+// settings table is behind the very connection being chosen. The setup
+// page, Admin → Database and a move write their choice beside the keys and
+// that file wins; otherwise DATABASE__PROVIDER (sqlserver unless it says
+// postgres) and the connection string from the environment — a blank
+// provider beside a string only PostgreSQL reads is an install from before
+// SQL Server was the default, and stays on PostgreSQL with a warning.
+// With neither there is no guess (a guessed localhost reaches whatever
+// server answers there): the process serves the setup page's connect step
+// until a database is connected, then carries on here on it. SQL Server
+// 2022 or later is insisted on before the first migration.
+// The setup token is made first so the connect step and the wizard after
+// it are one token, even when it is not pinned.
+var setupToken = new SetupToken(builder.Configuration);
+DatabaseSelection? Resolve() => DatabaseSelection.Resolve(
+    builder.Configuration, keysDir,
     // The same ring the host registers above, read a moment early; only
     // built when there is a file to read, so a fresh install creates no
     // key before the host has its own.
     () => DataProtectionProvider.Create(new DirectoryInfo(keysDir), b => b.SetApplicationName("WinnersPortal"))
         .CreateProtector(DatabaseOverrideFile.Purpose),
     warn: line => Console.Error.WriteLine("warn: " + line));
+var database = Resolve();
+if (database is null)
+{
+    // dotnet-ef runs this file to find the model and keeps the first host
+    // built; `migrations add` never connects, so it gets a placeholder and
+    // never the connect step's host.
+    if (EF.IsDesignTime)
+        database = DatabaseSelection.DesignTime(DatabaseProviders.Parse(builder.Configuration[DatabaseProviders.ConfigKey]), keysDir);
+    else if (await DatabaseBootstrap.RunAsync(args, keysDir, setupToken))
+        database = Resolve() ?? throw new InvalidOperationException("The connection the setup page saved could not be read back.");
+    else
+        return 0; // stopped before a database was connected
+}
 builder.Services.AddSingleton(database);
 
 // --- redis ----------------------------------------------------------------
@@ -79,8 +94,10 @@ if (RedisSettings.LegacyPins(
     Environment.SetEnvironmentVariable(SettingsRegistry.EnvVarName(RedisSettings.EnabledKey), onPin);
     Environment.SetEnvironmentVariable(SettingsRegistry.EnvVarName(RedisSettings.UrlKey), urlPin);
 }
-var redis = await RedisSettings.ReadAsync(database.Provider, database.ConnectionString,
-    warn: line => Console.Error.WriteLine("warn: " + line), CancellationToken.None);
+var redis = database.Source == DatabaseSource.DesignTime
+    ? RedisSettings.Resolve(null, null, "default")
+    : await RedisSettings.ReadAsync(database.Provider, database.ConnectionString,
+        warn: line => Console.Error.WriteLine("warn: " + line), CancellationToken.None);
 
 // --- the pages' origin, when it is not this one ---------------------------
 // Same-origin unless the Branding settings name an API URL other than the
@@ -139,7 +156,7 @@ builder.Services.AddSingleton<AppPause>();
 builder.Services.AddSingleton<DatabaseMoveState>();
 builder.Services.AddSingleton<DatabaseMover>();
 builder.Services.AddSingleton<AiOptions>();
-builder.Services.AddSingleton<SetupToken>();
+builder.Services.AddSingleton(setupToken);
 builder.Services.AddScoped<SetupService>();
 builder.Services.AddScoped<SetupTestLog>();
 builder.Services.AddSingleton<WinnersPortal.Services.Profiles.PaymentSecrets>();
@@ -186,11 +203,18 @@ builder.Services.AddSingleton<UnsubscribeTokens>();
 builder.Services.AddSingleton<PushWorkSignal>();
 
 // --- ai (drafts in the background; nothing in the request path) ----------
+// The client's own timeout is off: the pipeline (AiResilience) bounds
+// each attempt and the whole call from the settings, and it is
+// registered before the recorder so every attempt is its own row —
+// one pipeline per provider host, so a standby's circuit is its own.
 builder.Services.AddHttpClient(WinnersPortal.Services.Ai.AiProviderClient.HttpClientName,
-    c => c.Timeout = TimeSpan.FromSeconds(100)) // generation, not a ping
+    c => c.Timeout = Timeout.InfiniteTimeSpan)
+    .AddAiResilience()
     .RecordExternalCalls(ExternalServices.Ai);
 builder.Services.AddSingleton<WinnersPortal.Services.Ai.AiProviderClient>();
+builder.Services.AddSingleton<WinnersPortal.Services.Ai.AiCaller>();
 builder.Services.AddSingleton<WinnersPortal.Services.Ai.AiQuota>();
+builder.Services.AddSingleton<WinnersPortal.Services.Ai.AiInlineCache>();
 builder.Services.AddSingleton<WinnersPortal.Services.Ai.AiWorkSignal>();
 
 // --- identity verification (a session opened, a verdict read, and its proof — the decision and --
@@ -246,6 +270,7 @@ builder.Services.AddScoped<WinnersPortal.Services.Identity.IdentityService>();
 builder.Services.AddScoped<WinnersPortal.Services.Identity.IdentityProofService>();
 builder.Services.AddScoped<ApplicationService>();
 builder.Services.AddScoped<AwardService>();
+builder.Services.AddScoped<MilestonePaymentService>();
 builder.Services.AddScoped<CancelService>();
 builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<EntryService>();
@@ -256,6 +281,8 @@ builder.Services.AddScoped<GitHubWebhookService>();
 builder.Services.AddScoped<LeaderboardService>();
 builder.Services.AddScoped<TalentService>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<WinnersPortal.Services.Chat.ChatService>();
+builder.Services.AddScoped<WinnersPortal.Services.Chat.ChatModerationService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<SettingsAdminService>();
@@ -264,6 +291,8 @@ builder.Services.AddScoped<EntryZipService>();
 builder.Services.AddScoped<SubmissionService>();
 builder.Services.AddScoped<WinnersPortal.Services.Preview.CheckpointBuildService>();
 builder.Services.AddScoped<WinnersPortal.Services.Preview.PreviewService>();
+// Whether builds are on at all: an active build host that passed its test.
+builder.Services.AddScoped<WinnersPortal.Services.Preview.BuildHostService>();
 
 var signalR = builder.Services.AddSignalR();
 if (redis.Active is not null)
@@ -275,6 +304,8 @@ if (redis.Active is not null)
                 "Redis is on but the portal could not connect to it; the live board needs it. See the startup warning.")));
 }
 builder.Services.AddSingleton<ILiveBoard, LiveBoard>();
+// The conversations' doorbell: a room per signed-in member, rung on each line.
+builder.Services.AddSingleton<ILiveChat, LiveChat>();
 
 // --- captcha (Cloudflare Turnstile server-side verification) -------------
 builder.Services.AddHttpClient(Captcha.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10))
@@ -364,6 +395,7 @@ app.UseMiddleware<TermsGateMiddleware>();
 app.MapGet("/api/health", () => Results.Ok(new HealthResponse(Ok: true, TimeUtc: DateTimeOffset.UtcNow)));
 app.MapControllers();
 app.MapHub<WinnersPortal.Api.Live.OpportunityHub>("/api/live/opportunities");
+app.MapHub<WinnersPortal.Api.Live.ChatHub>("/api/live/chat");
 
 // Apply migrations before anything runs; FirstRunHostedService needs the schema.
 // On SQL Server, first the version and the full-text feature the model
@@ -401,12 +433,15 @@ tokens = new TokenService(await JwtSettings.LoadAsync(
     app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("WinnersPortal.Auth.Jwt"),
     CancellationToken.None));
 
+// Held before Run, which disposes the container on the way out.
+var moveState = app.Services.GetRequiredService<DatabaseMoveState>();
 app.Run();
 
-// A database move ends the process on purpose once its choice is written,
-// and relies on the service manager to bring it back — which WinSW does
-// only for a non-zero exit, and compose does under restart: unless-stopped.
-return app.Services.GetRequiredService<DatabaseMoveState>().RestartRequested ? 3 : 0;
+// A database move or a changed connection ends the process on purpose once
+// its choice is written, and relies on the service manager to bring it back
+// — which WinSW does only for a non-zero exit, and compose does under
+// restart: unless-stopped.
+return moveState.RestartRequested ? 3 : 0;
 
 /// <summary>The health check's answer: the API is up, and its clock.</summary>
 public sealed record HealthResponse(bool Ok, DateTimeOffset TimeUtc);

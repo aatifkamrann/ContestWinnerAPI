@@ -19,10 +19,14 @@ public static partial class MeritReader
     /// The half of the score the portal watched happen. Every number here is
     /// counted from rows this person cannot write.
     /// </summary>
-    public static Task<Merit.Record> RecordAsync(AppDbContext db, Guid userId, CancellationToken ct) =>
-        db.UseDapper ? RecordSqlAsync(db.Sql, userId, ct) : RecordLinqAsync(db, userId, ct);
+    public static Task<Merit.Record> RecordAsync(AppDbContext db, Guid userId, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return db.UseDapper ? RecordSqlAsync(db.Sql, userId, now, ct) : RecordLinqAsync(db, userId, now, ct);
+    }
 
-    internal static async Task<Merit.Record> RecordLinqAsync(AppDbContext db, Guid userId, CancellationToken ct)
+    internal static async Task<Merit.Record> RecordLinqAsync(
+        AppDbContext db, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
         // Entries that were really contested — a withdrawal is not an opportunity
         // entered, and neither is an entry the client removed.
@@ -32,13 +36,15 @@ public static partial class MeritReader
             {
                 e.Id,
                 Claimed = e.Checkpoints.Select(cp => new { cp.Milestone!.DueUtc, cp.ClaimedAtUtc }).ToList(),
-                Dated = e.Opportunity!.Milestones.Count(m => m.DueUtc != null),
+                Dated = e.Opportunity!.Milestones.Count(m => m.DueUtc != null
+                    && (m.DueUtc <= now || e.Checkpoints.Any(cp => cp.MilestoneId == m.Id))),
             })
             .ToListAsync(ct);
 
         // Only milestones whose opportunity gave them a date can be met on time,
-        // and only claims count against them — an unclaimed dated milestone
-        // is a miss, which is what makes the ratio worth reading.
+        // and a dated milestone counts once it is claimed or its date has
+        // passed — an unclaimed one past its date is a miss, which is what
+        // makes the ratio worth reading, and one not yet due is not.
         var onTime = entries.Sum(e => e.Claimed.Count(c => c.DueUtc != null && c.ClaimedAtUtc <= c.DueUtc));
         var dated = entries.Sum(e => e.Dated);
 
@@ -99,9 +105,10 @@ public static partial class MeritReader
         var result = new Dictionary<Guid, MeritRow>();
         if (userIds.Count == 0) return result;
 
+        var now = DateTimeOffset.UtcNow;
         var reads = db.UseDapper
-            ? await MeritReadsSqlAsync(db.Sql, userIds, ct)
-            : await MeritReadsLinqAsync(db, userIds, ct);
+            ? await MeritReadsSqlAsync(db.Sql, userIds, now, ct)
+            : await MeritReadsLinqAsync(db, userIds, now, ct);
 
         foreach (var id in userIds.Distinct())
         {
@@ -140,7 +147,7 @@ public static partial class MeritReader
     }
 
     internal static async Task<MeritReads> MeritReadsLinqAsync(
-        AppDbContext db, IReadOnlyCollection<Guid> userIds, CancellationToken ct)
+        AppDbContext db, IReadOnlyCollection<Guid> userIds, DateTimeOffset now, CancellationToken ct)
     {
         var profiles = await db.Profiles.AsNoTracking()
             .Where(p => userIds.Contains(p.UserId))
@@ -162,7 +169,8 @@ public static partial class MeritReader
                 e.FreelancerId,
                 e.Checkpoints.Count(cp =>
                     cp.Milestone!.DueUtc != null && cp.ClaimedAtUtc <= cp.Milestone.DueUtc),
-                e.Opportunity!.Milestones.Count(m => m.DueUtc != null),
+                e.Opportunity!.Milestones.Count(m => m.DueUtc != null
+                    && (m.DueUtc <= now || e.Checkpoints.Any(cp => cp.MilestoneId == m.Id))),
                 db.Awards.Any(a => a.EntryId == e.Id)))
             .ToListAsync(ct);
 

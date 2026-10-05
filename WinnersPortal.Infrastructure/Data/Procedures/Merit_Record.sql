@@ -1,7 +1,10 @@
 -- One person's contested entries, wins, on-time and dated milestone counts,
--- and ratings — the record the merit score is computed from, one row.
+-- and ratings — the record the merit score is computed from, one row. A
+-- dated milestone counts once it is claimed or its date has passed, so one
+-- not yet due is never a miss.
 CREATE OR ALTER PROCEDURE [dbo].[Merit_Record]
-    @userId uniqueidentifier
+    @userId uniqueidentifier,
+    @now datetimeoffset
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -18,7 +21,9 @@ BEGIN
            AND m.[DueUtc] IS NOT NULL AND cp.[ClaimedAtUtc] <= m.[DueUtc]) AS [MilestonesOnTime],
         (SELECT COUNT(*) FROM [Entries] e
          JOIN [Milestones] m ON m.[OpportunityId] = e.[OpportunityId]
-         WHERE e.[FreelancerId] = @userId AND e.[Status] = 0 AND m.[DueUtc] IS NOT NULL) AS [MilestonesDated],
+         WHERE e.[FreelancerId] = @userId AND e.[Status] = 0 AND m.[DueUtc] IS NOT NULL
+           AND (m.[DueUtc] <= @now OR EXISTS (SELECT 1 FROM [Checkpoints] cp
+                                              WHERE cp.[EntryId] = e.[Id] AND cp.[MilestoneId] = m.[Id]))) AS [MilestonesDated],
         (SELECT COUNT(*) FROM [Ratings] r WHERE r.[OfUserId] = @userId) AS [RatingCount],
         (SELECT ISNULL(SUM(r.[Stars]), 0) FROM [Ratings] r WHERE r.[OfUserId] = @userId) AS [RatingSum];
 END

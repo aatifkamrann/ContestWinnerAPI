@@ -22,7 +22,7 @@ public static class AiProviders
     public static readonly IReadOnlyList<AiProvider> All =
     [
         new(Gemini, "Google Gemini", "gemini-3.6-flash"),
-        new(Anthropic, "Anthropic Claude", "claude-sonnet-5"),
+        new(Anthropic, "Anthropic Claude", "claude-sonnet-5-5"),
         new(OpenAi, "OpenAI", "gpt-5.5"),
     ];
 

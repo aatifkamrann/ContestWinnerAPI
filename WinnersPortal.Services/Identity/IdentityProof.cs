@@ -36,7 +36,53 @@ public static class IdentityProof
     /// <summary>2, 4, 8 … minutes after each failed try, never more than an hour.</summary>
     public static TimeSpan Backoff(int attempts) => TimeSpan.FromMinutes(Math.Min(Math.Pow(2, Math.Max(attempts, 1)), 60));
 
-    public sealed record Image(string Name, string Url);
+    /// <param name="AccessToken">
+    /// Shufti Pro's decision-wide access token, posted to fetch the image;
+    /// null for Didit's links, which are signed and fetched as they are.
+    /// </param>
+    public sealed record Image(string Name, string Url, string? AccessToken = null);
+
+    /// <summary>
+    /// The images in a decision from <paramref name="provider"/>. Didit's are
+    /// found by name wherever they sit (<see cref="Images(string?)"/>).
+    /// Shufti Pro keeps its under <c>proofs</c> — the document's front, its
+    /// additional side, the selfie — each named "proof", with one access
+    /// token for them all; heatmaps, videos and the one-time report are
+    /// left as links.
+    /// </summary>
+    public static IReadOnlyList<Image> Images(string provider, string? decisionJson)
+    {
+        if (provider != IdentityProviders.ShuftiPro) return Images(decisionJson);
+        var found = new List<Image>();
+        if (string.IsNullOrWhiteSpace(decisionJson)) return found;
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(decisionJson);
+        }
+        catch (JsonException)
+        {
+            return found;
+        }
+        if (root?["proofs"] is not JsonObject proofs) return found;
+        var token = proofs["access_token"] is JsonValue t && t.GetValueKind() == JsonValueKind.String ? t.GetValue<string>() : null;
+        foreach (var (service, value) in proofs)
+        {
+            if (value is not JsonObject parts) continue;
+            foreach (var (name, link) in parts)
+            {
+                if (!name.Contains("proof", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("heatmap", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("video", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (link is JsonValue v && v.GetValueKind() == JsonValueKind.String
+                    && Uri.TryCreate(v.GetValue<string>(), UriKind.Absolute, out var uri)
+                    && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp))
+                    found.Add(new Image($"proofs.{service}.{name}", uri.ToString(), token));
+            }
+        }
+        return found;
+    }
 
     /// <summary>
     /// Every image link in a decision, in document order: a string that is
@@ -141,6 +187,65 @@ public static class IdentityProof
     }
 
     public sealed record Fact(string Label, string Value);
+
+    /// <summary>The first facts of a decision from <paramref name="provider"/>: Didit's as below, Shufti Pro's from its verification data and result.</summary>
+    public static IReadOnlyList<Fact> Summary(string provider, string? decisionJson) =>
+        provider == IdentityProviders.ShuftiPro ? ShuftiSummary(decisionJson) : Summary(decisionJson);
+
+    /// <summary>
+    /// Shufti Pro's decision: what its OCR read off the document under
+    /// verification_data.document, and the verdict per service under
+    /// verification_result (1 accepted, 0 declined).
+    /// </summary>
+    private static IReadOnlyList<Fact> ShuftiSummary(string? decisionJson)
+    {
+        var facts = new List<Fact>();
+        if (string.IsNullOrWhiteSpace(decisionJson)) return facts;
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(decisionJson);
+        }
+        catch (JsonException)
+        {
+            return facts;
+        }
+        if (root is not JsonObject top) return facts;
+        if (top["verification_data"]?["document"] is JsonObject document)
+        {
+            var name = document["name"] as JsonObject;
+            Add(facts, "Name", name is null
+                ? Text(document, "name")
+                : Text(name, "full_name")
+                    ?? string.Join(' ', new[] { Text(name, "first_name"), Text(name, "middle_name"), Text(name, "last_name") }
+                        .Where(s => !string.IsNullOrWhiteSpace(s))));
+            var type = document["selected_type"] is JsonArray types ? types.FirstOrDefault()?.ToString() : Text(document, "selected_type");
+            Add(facts, "Document", type?.Replace('_', ' '));
+            Add(facts, "Document number", Text(document, "document_number"));
+            Add(facts, "Date of birth", Text(document, "dob"));
+            Add(facts, "Issued by", Text(document, "country") ?? Text(top, "country"));
+            Add(facts, "Issued", Text(document, "issue_date"));
+            Add(facts, "Expires", Text(document, "expiry_date"));
+        }
+        if (top["verification_result"] is JsonObject result)
+        {
+            Add(facts, "Document check", Verdict(result["document"]));
+            Add(facts, "Face match", Verdict(result["face"]));
+        }
+        Add(facts, "Declined because", Text(top, "declined_reason"));
+        return facts;
+    }
+
+    /// <summary>A Shufti Pro service's verdict, 1 or 0 — or an object of them, where any 0 declines it.</summary>
+    private static string? Verdict(JsonNode? node) => node switch
+    {
+        JsonValue v when v.ToString() == "1" => "Accepted",
+        JsonValue v when v.ToString() == "0" => "Declined",
+        JsonObject parts => parts.Select(p => p.Value?.ToString()).Where(s => s is "0" or "1").ToList() is { Count: > 0 } said
+            ? said.Contains("0") ? "Declined" : "Accepted"
+            : null,
+        _ => null,
+    };
 
     /// <summary>
     /// The handful of things an administrator reads first — whose document,

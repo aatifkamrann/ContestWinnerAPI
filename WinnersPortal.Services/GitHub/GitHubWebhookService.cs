@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WinnersPortal.Domain;
 using WinnersPortal.Infrastructure.Data;
 using WinnersPortal.Services.Common;
+using WinnersPortal.Services.Opportunities;
 using WinnersPortal.Services.Live;
 using WinnersPortal.Services.Preview;
 using WinnersPortal.Services.Settings;
@@ -207,9 +208,23 @@ public sealed class GitHubWebhookService(
         ILogger log,
         CancellationToken ct)
     {
+        // Paid by milestone, a claim is the hired freelancer handing the
+        // milestone in: only the one being worked on, and again after the
+        // client asked for changes. Its own rules, its own save.
+        if (MilestonePay.ByMilestone(entry.Opportunity!.Kind))
+        {
+            var (problem, handedIn, again) = await MilestonePaymentService.HandInAsync(
+                db, entry, entry.Opportunity, number - 1, via, reference, sha, now, ct);
+            if (problem is not null) return ($"m{number} ignored — {problem}", false);
+            var queued = handedIn!.BuildStatus == PreviewBuildStatus.Pending;
+            log.LogInformation("Checkpoint: {Repo} handed in m{Number} via {Via}{Again}.",
+                entry.RepoFullName, number, via, again ? " again" : "");
+            return ($"{(again ? "handed in again" : "handed in")} m{number} via {via}" + (queued ? ", build queued" : ""), queued);
+        }
+
         // Claims land only while the opportunity runs; a tag pushed after the
         // freeze (or into a review) records activity but moves no board.
-        if (entry.Opportunity!.Status != OpportunityStatus.Open) return ($"m{number} ignored — opportunity not open", false);
+        if (entry.Opportunity.Status != OpportunityStatus.Open) return ($"m{number} ignored — opportunity not open", false);
 
         var milestone = await db.Milestones
             .SingleOrDefaultAsync(m => m.OpportunityId == entry.OpportunityId && m.Order == number - 1, ct);

@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinnersPortal.Services.Opportunities;
 
 namespace WinnersPortal.Services.Profiles;
@@ -7,24 +8,30 @@ namespace WinnersPortal.Services.Profiles;
 /// are reading about an entrant, out of 100.
 ///
 /// Two halves, and the split is the whole design. The portfolio half is
-/// self-reported and capped at 30, because anyone can type anything and a
+/// self-reported and capped at 25, because anyone can type anything and a
 /// score that could be maxed out by an afternoon of writing would be worth
-/// nothing. The record half is 70 and is earned on this portal: opportunities
+/// nothing. The record half is 75 and is earned on this portal: opportunities
 /// entered, milestones met on time, awards won, ratings from the other side
 /// of finished deals. Nothing here is a secret formula — every point has a
 /// line in the breakdown, and the profile page shows the person their own.
 ///
-/// It decides nothing. It does not gate entry, cap an award, order the
-/// board, or pick a winner; the client picks the winner by reading the code.
-/// It is a reading aid, and it is deliberately hard to move without doing
-/// the work it describes.
+/// It picks no winner and caps no award; the client picks the winner by
+/// reading the work. It shuts a door only where a client set a minimum merit
+/// score (<see cref="Fit"/>), and it orders the leaderboard unless another
+/// figure is picked there. It is a reading aid, and it is deliberately hard
+/// to move without doing the work it describes.
 /// </summary>
 public static class Merit
 {
     /// <summary>The written half at full house. What a given portal offers can be less — see <see cref="PortfolioAvailable"/>.</summary>
-    public const int PortfolioMax = 30;
-    public const int RecordMax = 70;
+    public const int PortfolioMax = 25;
+    public const int RecordMax = 75;
     public const int Max = PortfolioMax + RecordMax;
+
+    /// <summary>How many skills, projects and linked projects the written half counts — the review's levers aim at these.</summary>
+    public const int SkillsCounted = 5;
+    public const int ProjectsCounted = 6;
+    public const int LinksCounted = 4;
 
     /// <summary>Everything self-reported that the score reads.</summary>
     public sealed record Portfolio(
@@ -52,26 +59,26 @@ public static class Merit
 
     public static IReadOnlyList<Part> PortfolioParts(Portfolio p) =>
     [
-        new("A headline and an introduction", (p.HasHeadline ? 3 : 0) + (p.HasBio ? 4 : 0), 7,
+        new("A headline and an introduction", (p.HasHeadline ? 2 : 0) + (p.HasBio ? 3 : 0), 5,
             "Says what you do before anyone opens your code."),
         // Three is a shape; eight is a list. Rewarding the first few and
         // then stopping keeps this from becoming a keyword dump.
-        new("Skills listed", Math.Min(p.Skills, 6), 6,
-            "Up to six count. Naming twenty tools says less than naming six."),
-        new("Past work", Math.Min(p.Projects * 2, 6), 6,
-            "Two points each, for the first three."),
-        new("Work anyone can look at", Math.Min(p.ProjectsWithLinks * 2, 4), 4,
-            "A project with a link or a repository is worth double one without."),
-        new("Where and when you work", p.HasDetails ? 4 : 0, 4,
+        new("Skills listed", Math.Min(p.Skills, SkillsCounted), SkillsCounted,
+            "Up to five count. Naming twenty tools says less than naming five."),
+        new("Past work", Math.Min(p.Projects, ProjectsCounted), ProjectsCounted,
+            "One point each, for the first six."),
+        new("Work anyone can look at", Math.Min(p.ProjectsWithLinks, LinksCounted), LinksCounted,
+            "A project with a link or a repository is worth double one without, for the first four."),
+        new("Where and when you work", p.HasDetails ? 3 : 0, 3,
             "Location, hours a week, years of experience — what makes a deadline real."),
-        // A portal with no GitHub sign-in cannot offer these three to anyone,
+        // A portal with no GitHub sign-in cannot offer these two to anyone,
         // so they leave the denominator rather than sitting there unearnable —
         // otherwise the completeness bar stops at 90% for everybody, forever.
         // An account that connected before the portal dropped its GitHub App
         // keeps them: the connection is still a fact about that account, and
         // the score must not move under someone for an admin's settings edit.
-        new("GitHub connected", p.GithubConnected ? 3 : 0,
-            p.GithubOffered || p.GithubConnected ? 3 : 0,
+        new("GitHub connected", p.GithubConnected ? 2 : 0,
+            p.GithubOffered || p.GithubConnected ? 2 : 0,
             p.GithubOffered || p.GithubConnected
                 ? "Ties this account to a real public identity."
                 : "This portal has no GitHub sign-in, so these points are not on offer to anyone here."),
@@ -79,36 +86,37 @@ public static class Merit
 
     public static IReadOnlyList<Part> RecordParts(Record r)
     {
-        // Diminishing returns on volume: entering is cheap, and a score that
-        // paid linearly for it would reward spraying entries at everything.
-        var entered = r.Entries switch { 0 => 0, 1 => 5, 2 or 3 => 9, 4 or 5 => 12, _ => 15 };
+        // Volume stops paying at ten: entering is cheap, and a score that
+        // kept paying for it would reward spraying entries at everything.
+        var entered = Math.Min(r.Entries * 2, 20);
+        // The share of dated milestones met on time, scaled to thirty: ten
+        // of ten is the full thirty, eight of ten is twenty-four. A dated
+        // milestone is counted once it is claimed or its date has passed
+        // (MeritReader), so entering a new opportunity costs nothing here.
         var punctuality = r.MilestonesDated == 0
             ? 0
-            : (int)Math.Round(20.0 * r.MilestonesOnTime / r.MilestonesDated);
-        var wins = Math.Min(r.Wins * 10, 20);
-        // A single five-star rating is not a reputation. The average carries
-        // the quality, the count carries the confidence, and both are needed.
-        var ratings = r.RatingCount == 0
-            ? 0
-            : (int)Math.Round(15.0 * ((double)r.RatingSum / r.RatingCount / 5.0)
-                * Math.Min(r.RatingCount, 5) / 5.0);
+            : (int)Math.Round(30.0 * r.MilestonesOnTime / r.MilestonesDated, MidpointRounding.AwayFromZero);
+        var wins = Math.Min(r.Wins * 5, 20);
+        // The stars themselves: the average, to the nearest whole point.
+        var average = r.RatingCount == 0 ? 0 : (double)r.RatingSum / r.RatingCount;
+        var ratings = (int)Math.Round(average, MidpointRounding.AwayFromZero);
 
         return
         [
-            new("Opportunities entered", entered, 15,
-                r.MilestonesDated == 0 && r.Entries == 0
-                    ? "Nothing yet — the first entry is worth five."
-                    : "Fifteen at six or more; entering is cheap, so this flattens quickly."),
-            new("Milestones met on time", punctuality, 20,
+            new("Opportunities entered", entered, 20,
+                r.Entries == 0
+                    ? "Nothing yet — each entry is worth two."
+                    : "Two each, twenty at ten or more; entering is cheap, so this flattens quickly."),
+            new("Milestones met on time", punctuality, 30,
                 r.MilestonesDated == 0
-                    ? "No opportunity you entered has put dates on its milestones yet."
+                    ? "No dated milestone has come due or been claimed yet."
                     : $"{r.MilestonesOnTime} of {r.MilestonesDated} dated milestones claimed on time."),
-            new("Opportunities won", wins, 20, "Ten each, for the first two."),
-            new("Ratings from clients", ratings, 15,
+            new("Opportunities won", wins, 20, "Five each, for the first four."),
+            new("Ratings from clients", ratings, 5,
                 r.RatingCount == 0
                     ? "Ratings open when an award you won is marked paid."
-                    : $"{r.RatingCount} rating{(r.RatingCount == 1 ? "" : "s")}, and the count matters "
-                        + "as much as the stars until there are five."),
+                    : $"{average.ToString("0.#", CultureInfo.InvariantCulture)} stars on average from "
+                        + $"{r.RatingCount} rating{(r.RatingCount == 1 ? "" : "s")}, to the nearest whole point."),
         ];
     }
 

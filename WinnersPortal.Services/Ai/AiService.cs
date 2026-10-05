@@ -17,9 +17,9 @@ namespace WinnersPortal.Services.Ai;
 /// because one was unavailable. Every draft is fetched back by the person
 /// who asked for it, read, and acted on by them: AI drafts, humans decide.
 /// </summary>
-public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderClient providerClient, ILogger<AiService.AiFormDraftLog> log, AppDbContext db, AiWorkSignal aiSignal, GitHubService github)
+public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache cache, AiCaller caller, ILogger<AiService.AiFormDraftLog> log, AppDbContext db, AiWorkSignal aiSignal, GitHubService github)
 {
-    public async Task<Outcome<AiDraftResponse>> DraftBriefFieldAsync(string feature, OpportunityFormSnapshot request, CancellationToken ct)
+    public async Task<Outcome<AiDraftResponse>> DraftBriefFieldAsync(string feature, OpportunityFormSnapshot request, ClaimsPrincipal principal, CancellationToken ct)
     {
         if (AiFeatureRoutes.FromFormSlug(feature) is not { } f) return Outcome.NotFound();
 
@@ -35,7 +35,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
                 "Write the title and a few lines of the brief first — there is nothing to read yet.");
 
         return await DraftInlineAsync(
-            f, AiPrompts.ForForm(f, request), ai, quota, providerClient, log, ct);
+            f, AiPrompts.ForForm(f, request), principal, ai, quota, cache, caller, log, ct);
     }
 
     public async Task<Outcome<AiDraftResponse>> DraftProfileSummaryAsync(ProfileSummaryRequest request, ClaimsPrincipal principal, CancellationToken ct)
@@ -49,7 +49,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
             return Outcome.Invalid(
                 "Add a title, a few skills or a line about your work first — there is nothing to read yet.");
 
-        return await DraftInlineAsync(f, AiPrompts.ProfileSummary(json), ai, quota, providerClient, log, ct);
+        return await DraftInlineAsync(f, AiPrompts.ProfileSummary(json), principal, ai, quota, cache, caller, log, ct);
     }
 
     public async Task<Outcome<ProfileReviewResponse>> ProfileReviewAsync(ClaimsPrincipal principal, CancellationToken ct)
@@ -62,7 +62,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
 
         var facts = await ProfileReview.ReadAsync(db, userId.Value, await github.CanConnectAsync(ct), ct);
         if (facts is null) return Outcome.NotFound();
-        var hash = AiRules.InputHash(AiInputs.ProfileReview(facts));
+        var hash = AiRules.InputHash(f, AiInputs.ProfileReview(facts));
 
         var artifact = await ArtifactAsync(db, f, userId.Value, ct);
         if (artifact?.InputHash != hash && artifact?.Status != AiArtifactStatus.Pending)
@@ -70,7 +70,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
             artifact = await UpsertAsync(db, f, userId.Value, ct);
             aiSignal.Wake();
         }
-        return Outcome.Ok<ProfileReviewResponse>(ReviewDto(artifact!, facts));
+        return Outcome.Ok<ProfileReviewResponse>(ReviewDto(artifact!, facts, await ai.PublicNameAsync(ct)));
     }
 
     public async Task<Outcome<AiArtifactView>> RequestOpportunityFeatureAsync(Guid id, string feature, ClaimsPrincipal principal, CancellationToken ct)
@@ -91,7 +91,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
 
         var artifact = await UpsertAsync(db, f, id, ct);
         aiSignal.Wake();
-        return Outcome.Ok(Dto(artifact));
+        return Outcome.Ok(Dto(artifact, await ai.PublicNameAsync(ct)));
     }
 
     public async Task<Outcome<AiArtifactResponse>> OpportunityFeatureAsync(Guid id, string feature, ClaimsPrincipal principal, CancellationToken ct)
@@ -101,7 +101,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
         if (!owns) return Outcome.NotFound();
 
         var artifact = await ArtifactAsync(db, f, id, ct);
-        return Outcome.Ok<AiArtifactResponse>(artifact is null ? new AiArtifactNone { Status = "none" } : Dto(artifact));
+        return Outcome.Ok<AiArtifactResponse>(artifact is null ? new AiArtifactNone { Status = "none" } : Dto(artifact, await ai.PublicNameAsync(ct)));
     }
 
     public async Task<Outcome<AiArtifactView>> RequestDigestAsync(Guid id, ClaimsPrincipal principal, CancellationToken ct)
@@ -116,7 +116,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
 
         var artifact = await UpsertAsync(db, AiFeature.EntryDigest, id, ct);
         aiSignal.Wake();
-        return Outcome.Ok(Dto(artifact));
+        return Outcome.Ok(Dto(artifact, await ai.PublicNameAsync(ct)));
     }
 
     public async Task<Outcome<AiArtifactResponse>> DigestAsync(Guid id, ClaimsPrincipal principal, CancellationToken ct)
@@ -125,7 +125,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
         if (!owns) return Outcome.NotFound();
 
         var artifact = await ArtifactAsync(db, AiFeature.EntryDigest, id, ct);
-        return Outcome.Ok<AiArtifactResponse>(artifact is null ? new AiArtifactNone { Status = "none" } : Dto(artifact));
+        return Outcome.Ok<AiArtifactResponse>(artifact is null ? new AiArtifactNone { Status = "none" } : Dto(artifact, await ai.PublicNameAsync(ct)));
     }
 
     public async Task<Outcome<AiArtifactView>> RequestStandingNotesAsync(Guid id, ClaimsPrincipal principal, CancellationToken ct)
@@ -142,7 +142,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
 
         var artifact = await UpsertAsync(db, AiFeature.StandingNotes, id, ct);
         aiSignal.Wake();
-        return Outcome.Ok(Dto(artifact));
+        return Outcome.Ok(Dto(artifact, await ai.PublicNameAsync(ct)));
     }
 
     public async Task<Outcome<AiArtifactResponse>> StandingNotesAsync(Guid id, ClaimsPrincipal principal, CancellationToken ct)
@@ -150,7 +150,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
         if (await ModeratedAsync(db, id, principal, ct) is null) return Outcome.NotFound();
 
         var artifact = await ArtifactAsync(db, AiFeature.StandingNotes, id, ct);
-        return Outcome.Ok<AiArtifactResponse>(artifact is null ? new AiArtifactNone { Status = "none" } : Dto(artifact));
+        return Outcome.Ok<AiArtifactResponse>(artifact is null ? new AiArtifactNone { Status = "none" } : Dto(artifact, await ai.PublicNameAsync(ct)));
     }
 
     /// <summary>
@@ -236,49 +236,76 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
 
     /// <summary>
     /// One call, answered inside the request, for the tools that read a
-    /// form. The quota is consumed before the call and given back when the
-    /// provider refused to run it (a 429 or a 5xx costs nothing; a 4xx was
-    /// ours), and the answer goes through the same validation every
-    /// queued draft does, so nothing off-contract reaches a form.
+    /// form. The caps are consulted before anything is sent — the member's
+    /// minute and day, then the portal's day — and the counted call is
+    /// given back when the provider never ran it (a 429, a 5xx, the pause
+    /// after repeated failures; a 4xx was ours), whichever setup ran it —
+    /// the standby is asked when the active provider cannot be reached
+    /// (<see cref="AiCaller"/>). An unchanged form within
+    /// the hour is answered from the inline cache without a call, and the
+    /// answer goes through the same validation every queued draft does,
+    /// so nothing off-contract reaches a form.
     /// </summary>
     internal static async Task<Outcome<AiDraftResponse>> DraftInlineAsync(
-        AiFeature f, (string System, string User) prompt,
-        AiOptions ai, AiQuota quota, AiProviderClient providerClient, ILogger log, CancellationToken ct)
+        AiFeature f, (string System, string User) prompt, ClaimsPrincipal principal,
+        AiOptions ai, AiQuota quota, AiInlineCache cache, AiCaller caller, ILogger log, CancellationToken ct)
     {
-        if (!await quota.TryConsumeAsync(ct))
-            return Outcome.Conflict("The daily AI call ceiling is reached — try again tomorrow.");
+        var memberId = Principal.UserId(principal);
+        var who = memberId is { } id ? AiSpender.Member(id, principal.IsInRole(Roles.Admin)) : AiSpender.Portal;
+        var hash = AiRules.InputHash(f, prompt.System + "\n" + prompt.User);
+        var now = DateTimeOffset.UtcNow;
+        if (memberId is { } m && cache.Get(m, f, hash, now) is { } held)
+            return Outcome.Ok(new AiDraftResponse
+            {
+                Output = JsonSerializer.Deserialize<JsonElement>(held),
+                Provider = await ai.PublicNameAsync(ct),
+                CompletedAtUtc = now,
+                Cached = true,
+            });
 
-        var config = await ai.ProviderConfigAsync(ct);
-        if (config is null)
+        var verdict = await quota.ConsumeAsync(who, ct);
+        if (verdict == AiQuotaVerdict.MemberBurst)
+            return Outcome.TooManyRequests(new ErrorResponse(AiQuotaRules.Refusal(verdict)));
+        if (verdict != AiQuotaVerdict.Allowed)
+            return Outcome.Conflict(AiQuotaRules.Refusal(verdict));
+
+        var route = await ai.RouteAsync(f, ct);
+        if (route is null)
             return Outcome.Conflict("No AI provider key is saved — the operator can add one in settings.");
-        var model = config.Model ?? AiProviderRequests.DefaultModel(config.Provider);
 
-        string answer;
+        AiAnswer answer;
         try
         {
-            answer = await providerClient.CompleteAsync(
-                config.Provider, model, config.ApiKey, prompt.System, prompt.User, ct);
+            answer = await caller.CompleteAsync(route, f, prompt, ct);
         }
         catch (AiProviderException e)
         {
             // Nothing ran, so nothing was spent: give the counted call back
             // rather than charging the member for the provider having a bad
-            // minute. They can press again straight away.
-            if (e.StatusCode is 429 or >= 500) await quota.RefundAsync(ct);
-            log.LogWarning(e, "AI {Feature} refused by {Provider}.", f, config.Provider);
+            // minute. They can press again straight away. A 200 with no
+            // answer in it was billed, and is spent like one — under the
+            // provider and model that billed it, the standby's when it was.
+            if (AiRules.NothingRan(e)) await quota.RefundAsync(who, ct);
+            else if (e.Tokens is { } billed)
+                await quota.SpendAsync(who, AiPrompts.FeatureName(f), e.Provider ?? route.Active.Provider, e.Model ?? route.Model, billed, ct);
+            log.LogWarning(e, "AI {Feature} refused by {Provider}.", f, e.Provider ?? route.Active.Provider);
             return Outcome.Conflict(e.Friendly);
         }
+        await quota.SpendAsync(who, AiPrompts.FeatureName(f), answer.Provider, answer.Model, answer.Completion.Tokens ?? AiTokens.None, ct);
 
-        var canonical = AiOutputs.Validate(f, answer, out var error);
+        var canonical = AiOutputs.Validate(f, answer.Completion.Text, out var error);
         if (canonical is null)
             return Outcome.Conflict(error ?? "The answer did not match the expected shape.");
 
-        log.LogInformation("AI {Feature} drafted inline by {Provider}:{Model}.", f, config.Provider, model);
+        if (memberId is { } member) cache.Put(member, f, hash, canonical, now);
+        log.LogInformation("AI {Feature} drafted inline by {Provider}:{Model}{Standby}.",
+            f, answer.Provider, answer.Model, answer.Standby ? " (standby)" : "");
         return Outcome.Ok(new AiDraftResponse
         {
             Output = JsonSerializer.Deserialize<JsonElement>(canonical),
-            Provider = AiBrand.Name,
+            Provider = await ai.PublicNameAsync(ct),
             CompletedAtUtc = DateTimeOffset.UtcNow,
+            Cached = false,
         });
     }
 
@@ -288,7 +315,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
     /// the portal otherwise. "worded" says whether any of the words are the
     /// model's; "stale" that they answer an older profile than this one.
     /// </summary>
-    private static ProfileReviewResult ReviewDto(AiArtifact a, ProfileReview.Facts facts) => new ProfileReviewResult
+    private static ProfileReviewResult ReviewDto(AiArtifact a, ProfileReview.Facts facts, string aiName) => new ProfileReviewResult
     {
         Status = a.Status switch
         {
@@ -302,7 +329,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
         Worded = a.OutputJson is not null,
         Stale = a.OutputJson is not null && a.Status != AiArtifactStatus.Done,
         Note = a.Note,
-        Provider = AiBrand.Public(a.Provider),
+        Provider = AiBrand.Public(a.Provider, aiName),
         CompletedAtUtc = a.CompletedAtUtc,
     };
 
@@ -316,7 +343,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
     }
 
     /// <summary>Output only travels once it is Done — a re-queued draft shows as pending, not stale.</summary>
-    internal static AiArtifactView Dto(AiArtifact a) => new AiArtifactView
+    internal static AiArtifactView Dto(AiArtifact a, string aiName) => new AiArtifactView
     {
         Status = a.Status switch
         {
@@ -329,7 +356,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiProviderCli
             ? JsonSerializer.Deserialize<JsonElement>(a.OutputJson)
             : (JsonElement?)null,
         Note = a.Note,
-        Provider = AiBrand.Public(a.Provider),
+        Provider = AiBrand.Public(a.Provider, aiName),
         CompletedAtUtc = a.CompletedAtUtc,
     };
 }

@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using WinnersPortal.Infrastructure.Data;
 using WinnersPortal.Domain;
+using WinnersPortal.Services.Ai;
 using WinnersPortal.Services.Common;
 using WinnersPortal.Services.Settings;
 
@@ -149,19 +150,40 @@ public sealed partial class ActivityWriter(
         }
     }
 
+    /// <summary>
+    /// The hour's two sweeps: rows older than the log's retention go
+    /// whole, and the AI rows older than the shorter body retention
+    /// (<see cref="AiRetention"/>) keep their row and lose what was sent
+    /// and answered. Either setting at 0 skips its sweep.
+    /// </summary>
     private async Task SweepAsync(CancellationToken ct)
     {
         _lastSweep = DateTimeOffset.UtcNow;
         try
         {
-            if (ActivityRetention.CutOff(await settings.GetAsync(ActivityRetention.Key, ct), _lastSweep) is not { } cutOff)
-                return;
+            var cutOff = ActivityRetention.CutOff(await settings.GetAsync(ActivityRetention.Key, ct), _lastSweep);
+            var bodyCutOff = AiRetention.CutOff(await settings.GetAsync(AiRetention.Key, ct), _lastSweep);
+            if (cutOff is null && bodyCutOff is null) return;
             using var scope = scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var removed = db.UseDapper
-                ? await SweepSqlAsync(db.Sql, cutOff, ct)
-                : await db.ActivityEvents.Where(e => e.AtUtc < cutOff).ExecuteDeleteAsync(ct);
-            if (removed > 0) log.LogInformation("Activity log: {Count} rows older than {CutOff:u} removed.", removed, cutOff);
+            if (cutOff is { } removeBefore)
+            {
+                var removed = db.UseDapper
+                    ? await SweepSqlAsync(db.Sql, removeBefore, ct)
+                    : await db.ActivityEvents.Where(e => e.AtUtc < removeBefore).ExecuteDeleteAsync(ct);
+                if (removed > 0) log.LogInformation("Activity log: {Count} rows older than {CutOff:u} removed.", removed, removeBefore);
+            }
+            if (bodyCutOff is { } clearBefore)
+            {
+                var cleared = db.UseDapper
+                    ? await ClearAiBodiesSqlAsync(db.Sql, clearBefore, ct)
+                    : await db.ActivityEvents
+                        .Where(e => e.Service == ExternalServices.Ai && e.AtUtc < clearBefore && (e.Request != null || e.Response != null))
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(e => e.Request, (string?)null)
+                            .SetProperty(e => e.Response, (string?)null), ct);
+                if (cleared > 0) log.LogInformation("Activity log: the bodies of {Count} AI calls older than {CutOff:u} cleared.", cleared, clearBefore);
+            }
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {

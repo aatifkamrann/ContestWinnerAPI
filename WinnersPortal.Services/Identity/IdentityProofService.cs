@@ -33,7 +33,7 @@ public sealed class IdentityProofService(AppDbContext db, StorageService storage
             Note = row.Note,
             DecisionReadAtUtc = row.DecisionReadAtUtc,
             Decision = row.DecisionJson is null ? null : IdentityProof.Pretty(row.DecisionJson),
-            Facts = IdentityProof.Summary(row.DecisionJson)
+            Facts = IdentityProof.Summary(row.Provider, row.DecisionJson)
                 .Select(f => new IdentityProofFact { Label = f.Label, Value = f.Value }),
             Documents = documents.Select(d => new IdentityProofDocument
             {

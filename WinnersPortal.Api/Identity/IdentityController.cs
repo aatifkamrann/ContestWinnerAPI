@@ -9,12 +9,13 @@ namespace WinnersPortal.Api.Identity;
 [ApiController]
 public sealed class IdentityController(IdentityService identity) : ControllerBase
 {
-    // Opens a session with the provider and answers where to send the
-    // member; the browser goes there and comes back to /verify/done.
+    // Opens a session with the provider — or hands back the member's
+    // unfinished one — and answers where to send them; the browser goes
+    // there and comes back to /verify/done, which sends it on to returnTo.
     [HttpPost("api/identity/session")]
     [Authorize]
-    public async Task<IResult> PostSession(CancellationToken ct) =>
-        (await identity.StartAsync(User, ct)).ToResult();
+    public async Task<IResult> PostSession([FromBody] IdentityStartRequest? request, CancellationToken ct) =>
+        (await identity.StartAsync(User, request, ct)).ToResult();
 
     [HttpGet("api/identity/status")]
     [Authorize]
@@ -43,5 +44,15 @@ public sealed class IdentityWebhookController(IdentityService identity) : Contro
             Request.Headers["X-Signature"].ToString(),
             Request.Headers["X-Timestamp"].ToString(),
             ct)).ToResult();
+    }
+
+    // Shufti Pro posts to the address each request named; its Signature
+    // header is over the raw body, like Didit's.
+    [HttpPost("api/webhooks/identity/shufti")]
+    public async Task<IResult> PostWebhooksIdentityShufti(CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        await Request.Body.CopyToAsync(buffer, ct);
+        return (await identity.ReceiveShuftiAsync(buffer.ToArray(), Request.Headers["Signature"].ToString(), ct)).ToResult();
     }
 }

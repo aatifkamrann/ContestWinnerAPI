@@ -169,7 +169,7 @@ public static partial class FitReader
     {
         if (!await ai.IsFeatureEnabledAsync(AiFeature.RecommendedMatching, ct)) return null;
 
-        var hash = AiRules.InputHash(AiInputs.Taxonomy() + profileJson());
+        var hash = AiRules.InputHash(AiFeature.RecommendedMatching, AiInputs.Taxonomy() + profileJson());
         var artifact = await db.AiArtifacts
             .SingleOrDefaultAsync(a => a.Feature == AiFeature.RecommendedMatching && a.SubjectId == userId, ct);
 

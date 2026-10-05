@@ -15,42 +15,54 @@ public static class ExternalWebhooks
     public static string? ServiceOf(string? path) => path?.ToLowerInvariant() switch
     {
         "/api/webhooks/github" => ExternalServices.GitHub,
-        "/api/webhooks/identity" => ExternalServices.Identity,
+        "/api/webhooks/identity" or "/api/webhooks/identity/shufti" => ExternalServices.Identity,
         _ => null,
     };
 
-    /// <summary>The row's Action: "Webhook from GitHub".</summary>
-    public static string Action(string service) => service switch
+    /// <summary>The row's Action: "Webhook from GitHub"; the identity provider is told apart by the path it posted to.</summary>
+    public static string Action(string service, string? path = null) => service switch
     {
         ExternalServices.GitHub => "Webhook from GitHub",
+        ExternalServices.Identity when IsShufti(path) => "Webhook from Shufti Pro",
         ExternalServices.Identity => "Webhook from Didit",
         _ => "Webhook received",
     };
 
+    private static bool IsShufti(string? path) =>
+        string.Equals(path, "/api/webhooks/identity/shufti", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// What the delivery was about, for the row's Subject: GitHub's event
     /// and action ("pull_request · opened"), the identity provider's
-    /// webhook type and status ("status.updated · Approved"). Null when
-    /// the body says neither.
+    /// webhook type and status ("status.updated · Approved"), or Shufti
+    /// Pro's one event ("verification.accepted"). Null when the body says
+    /// none of these.
     /// </summary>
     public static string? Subject(string service, string? githubEvent, string? body)
     {
         var root = Parse(body);
         var parts = service == ExternalServices.GitHub
             ? new[] { githubEvent, Text(root, "action") }
-            : new[] { Text(root, "webhook_type"), Text(root, "status") };
+            : new[] { Text(root, "webhook_type"), Text(root, "status"), Text(root, "event") };
         var said = parts.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
         return said.Count == 0 ? null : string.Join(" · ", said);
     }
 
     /// <summary>
     /// Whose delivery it is, where the body says: the identity provider
-    /// hands back the member's id as vendor_data, which the portal put there
-    /// when it opened the session. So a verdict is the member's row, and
-    /// erasing the member clears what it carried.
+    /// hands back the member's id — Didit as vendor_data, Shufti Pro inside
+    /// the reference — which the portal put there when it opened the
+    /// session. So a verdict is the member's row, and erasing the member
+    /// clears what it carried.
     /// </summary>
-    public static Guid? UserOf(string service, string? body) =>
-        service == ExternalServices.Identity && Guid.TryParse(Text(Parse(body), "vendor_data"), out var id) ? id : null;
+    public static Guid? UserOf(string service, string? body)
+    {
+        if (service != ExternalServices.Identity) return null;
+        var root = Parse(body);
+        return Guid.TryParse(Text(root, "vendor_data"), out var id)
+            ? id
+            : Identity.IdentityProviderRequests.UserOfReference(Text(root, "reference"));
+    }
 
     private static JsonElement? Parse(string? body)
     {

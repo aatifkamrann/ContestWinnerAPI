@@ -12,33 +12,37 @@ public enum DatabaseSource
     Override,
     /// <summary>DATABASE__PROVIDER and ConnectionStrings__Db.</summary>
     Environment,
-    /// <summary>Nothing set: the development fallback to the stock compose database.</summary>
-    Default,
+    /// <summary>dotnet-ef building the model with nothing set: a placeholder that is never opened.</summary>
+    DesignTime,
 }
 
 /// <summary>
 /// The database this process runs on, decided once before the host is
 /// built, since the settings table is behind the very connection being
-/// chosen. Precedence: the override file an in-app move wrote, then the
-/// environment, then — in development only — the stock compose string
-/// for the provider asked for, SQL Server unless it says postgres.
+/// chosen. Precedence: the file the setup page, Admin → Database or a move
+/// wrote beside the keys, then the environment. With neither there is no
+/// guess — a guessed localhost reaches whatever server answers there — and
+/// the API starts on the setup page's connect step instead
+/// (DatabaseBootstrap).
 /// </summary>
 public sealed record DatabaseSelection(
     DatabaseProvider Provider, string ConnectionString, DatabaseSource Source, string OverridePath, string KeysDir)
 {
-    /// <summary>The compose mssql service as a bare <c>dotnet run</c> reaches it, with the compose file's development password.</summary>
-    public const string SqlServerDevelopmentFallback =
-        "Server=localhost,1433;Database=winnersportal;User Id=sa;Password=WinnersPortal-Dev-1;TrustServerCertificate=True";
+    /// <summary>
+    /// What dotnet-ef builds the model with when nothing is set: `migrations
+    /// add` never connects, so the string only has to parse. Never used by a
+    /// running portal.
+    /// </summary>
+    public static DatabaseSelection DesignTime(DatabaseProvider provider, string keysDir) => new(
+        provider,
+        provider == DatabaseProvider.SqlServer
+            ? "Server=design-time.invalid;Database=winnersportal;Integrated Security=true"
+            : "Host=design-time.invalid;Database=winnersportal",
+        DatabaseSource.DesignTime, DatabaseOverrideFile.PathIn(keysDir), keysDir);
 
-    /// <summary>The compose db service (profile postgres) as a bare <c>dotnet run</c> reaches it.</summary>
-    public const string PostgresDevelopmentFallback =
-        "Host=localhost;Port=5432;Database=winnersportal;Username=winnersportal;Password=winnersportal";
-
-    public static string DevelopmentFallback(DatabaseProvider provider) =>
-        provider == DatabaseProvider.SqlServer ? SqlServerDevelopmentFallback : PostgresDevelopmentFallback;
-
-    public static DatabaseSelection Resolve(
-        IConfiguration config, string keysDir, bool isDevelopment, Func<IDataProtector> protector, Action<string>? warn = null)
+    /// <summary>The saved file's choice, else the environment's; null when neither names a database.</summary>
+    public static DatabaseSelection? Resolve(
+        IConfiguration config, string keysDir, Func<IDataProtector> protector, Action<string>? warn = null)
     {
         var overridePath = DatabaseOverrideFile.PathIn(keysDir);
         var rawProvider = config[DatabaseProviders.ConfigKey];
@@ -71,11 +75,7 @@ public sealed record DatabaseSelection(
             return new DatabaseSelection(envProvider, envString, DatabaseSource.Environment, overridePath, keysDir);
         }
 
-        if (!isDevelopment)
-            throw new InvalidOperationException(
-                "No database connection string: set the ConnectionStrings__Db environment variable "
-                + "(docker-compose.yml for the container, deploy/windows/winnersportal-api.xml for the Windows service).");
-        return new DatabaseSelection(envProvider, DevelopmentFallback(envProvider), DatabaseSource.Default, overridePath, keysDir);
+        return null;
     }
 
     /// <summary>

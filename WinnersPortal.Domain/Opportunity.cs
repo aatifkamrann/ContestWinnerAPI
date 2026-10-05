@@ -37,9 +37,27 @@ public enum OpportunityDelivery
 }
 
 /// <summary>
-/// A fixed-award opportunity: one brief, one award, open entry, work delivered
-/// as a private repo per entrant or as uploaded files (<see cref="Delivery"/>),
-/// and the client reviews it before paying.
+/// How an opportunity pays, chosen while drafting and frozen at publish.
+/// </summary>
+public enum OpportunityKind
+{
+    /// <summary>Several entrants build in parallel; the client announces one winner and pays the award after review.</summary>
+    Competitive = 0,
+
+    /// <summary>
+    /// The client hires one applicant, who works through the milestones in
+    /// order; each milestone is approved and paid its own amount before the
+    /// next one opens, and the last payment completes the award.
+    /// </summary>
+    Milestones = 1,
+}
+
+/// <summary>
+/// A fixed-award opportunity: one brief, one award, work delivered as a
+/// private repo per entrant or as uploaded files (<see cref="Delivery"/>).
+/// Competitive: open entry, and the client reviews before paying one
+/// winner. Paid by milestone (<see cref="Kind"/>): one hired freelancer,
+/// paid milestone by milestone.
 /// </summary>
 public sealed class Opportunity
 {
@@ -93,8 +111,15 @@ public sealed class Opportunity
     /// <summary>The scoring rubric: points per criterion, totalling whatever the client made them total.</summary>
     public List<OpportunityCriterion> Criteria { get; set; } = [];
 
-    /// <summary>The fixed award, in <see cref="Currency"/>. Validated against opportunity.minAwardUsd at publish.</summary>
+    /// <summary>
+    /// The fixed award, in <see cref="Currency"/>. Validated against
+    /// opportunity.minAwardUsd at publish. Paid by milestone, it is the
+    /// total the milestones' amounts must add up to.
+    /// </summary>
     public decimal AwardAmount { get; set; }
+
+    /// <summary>Competitive or paid by milestone. Set while drafting; frozen at publish.</summary>
+    public OpportunityKind Kind { get; set; } = OpportunityKind.Competitive;
 
     public string Currency { get; set; } = "USD";
 

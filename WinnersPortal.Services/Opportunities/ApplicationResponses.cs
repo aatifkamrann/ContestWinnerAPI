@@ -25,6 +25,8 @@ public sealed record ApplyFormOpportunity
     public required string Status { get; init; }
     public required string Delivery { get; init; }
     public required bool NeedsGithubUsername { get; init; }
+    /// <summary>"competitive" or "milestones": the form words its pledges by how the job pays.</summary>
+    public required string Kind { get; init; }
     public required string? Category { get; init; }
     public required string? CategoryLabel { get; init; }
     public required List<string> Skills { get; init; }

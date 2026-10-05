@@ -262,6 +262,13 @@ public sealed class UserAdminService(AppDbContext db, SettingsService settings, 
         // record; what they wrote on the way out does not.
         await db.Entries.Where(e => e.FreelancerId == id && e.WithdrawnReason != null)
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.WithdrawnReason, (string?)null), ct);
+        // So is what they said in a conversation. The other side's lines
+        // stay, as the other side's own record of what they asked and
+        // answered. Only an account with an entry or an opportunity can have
+        // said anything, so in practice this is the erase-in-place outcome's.
+        await db.ChatMessages.Where(m => m.SenderId == id).ExecuteDeleteAsync(ct);
+        // And what they reported, in their own words, with the reports.
+        await db.ChatReports.Where(r => r.ReporterId == id).ExecuteDeleteAsync(ct);
 
         if (AccountRules.LeavesNoTrace(opportunities, entries, ratings))
         {
@@ -272,6 +279,10 @@ public sealed class UserAdminService(AppDbContext db, SettingsService settings, 
             await db.Profiles.IgnoreQueryFilters()
                 .Where(p => p.DeletedByUserId == id)
                 .ExecuteUpdateAsync(s => s.SetProperty(p => p.DeletedByUserId, (Guid?)null), ct);
+            // So do reports they reviewed, the same way and for the same reason.
+            await db.ChatReports
+                .Where(r => r.ResolvedById == id)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.ResolvedById, (Guid?)null), ct);
             db.Users.Remove(user);
             await db.SaveChangesAsync(ct);
             // The verification went with the account; its stored document
@@ -357,7 +368,13 @@ public sealed class UserAdminService(AppDbContext db, SettingsService settings, 
         // the stored images of the document and the face — is the person,
         // and goes: the decision here, the images by the proof worker.
         var verification = await db.IdentityVerifications.SingleOrDefaultAsync(v => v.UserId == id, ct);
-        if (verification is not null) IdentityService.ClearProof(verification);
+        if (verification is not null)
+        {
+            IdentityService.ClearProof(verification);
+            // An unfinished session's link opens the provider's page for this person.
+            verification.SessionUrl = null;
+            verification.ReturnPath = null;
+        }
         await db.IdentityDocuments.Where(d => d.UserId == id && d.RemovedAtUtc == null)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.RemovedAtUtc, now), ct);
 

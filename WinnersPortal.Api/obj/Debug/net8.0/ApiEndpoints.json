@@ -1,0 +1,2331 @@
+[
+  {
+    "ContainingType": "WinnersPortal.Api.Activity.ActivityController",
+    "Method": "PostActivityVisit",
+    "RelativePath": "api/activity/visit",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Api.Activity.ActivityController\u002BVisitRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Activity.ActivityController",
+    "Method": "GetAdminActivity",
+    "RelativePath": "api/admin/activity",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "user",
+        "Type": "System.Nullable\u00601[[System.Guid, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      },
+      {
+        "Name": "visitor",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "kind",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "service",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "who",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "q",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "from",
+        "Type": "System.Nullable\u00601[[System.DateTimeOffset, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      },
+      {
+        "Name": "to",
+        "Type": "System.Nullable\u00601[[System.DateTimeOffset, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      },
+      {
+        "Name": "page",
+        "Type": "System.Nullable\u00601[[System.Int32, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      },
+      {
+        "Name": "size",
+        "Type": "System.Nullable\u00601[[System.Int32, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      },
+      {
+        "Name": "aiProvider",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "aiModel",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Activity.ActivityController",
+    "Method": "GetAdminActivityExchange",
+    "RelativePath": "api/admin/activity/{id}/exchange",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int64",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Activity.ActivityController",
+    "Method": "GetAdminActivityAiModels",
+    "RelativePath": "api/admin/activity/ai-models",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.AdminController",
+    "Method": "PostAwardsRestartHandover",
+    "RelativePath": "api/admin/awards/{id}/restart-handover",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.DatabaseController",
+    "Method": "GetDatabase",
+    "RelativePath": "api/admin/database",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.DatabaseController",
+    "Method": "PostDatabaseMove",
+    "RelativePath": "api/admin/database/move",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Database.DatabaseTargetRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.DatabaseController",
+    "Method": "GetDatabaseMove",
+    "RelativePath": "api/admin/database/move",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.DatabaseController",
+    "Method": "PostDatabaseTest",
+    "RelativePath": "api/admin/database/test",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Database.DatabaseTargetRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.AdminController",
+    "Method": "PostDeliveriesReplay",
+    "RelativePath": "api/admin/deliveries/{id}/replay",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.AdminController",
+    "Method": "PostEntriesRetryProvision",
+    "RelativePath": "api/admin/entries/{id}/retry-provision",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "GetIdentityDocument",
+    "RelativePath": "api/admin/identity-documents/{id}/view",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.AdminController",
+    "Method": "GetOperations",
+    "RelativePath": "api/admin/operations",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.AdminController",
+    "Method": "PostSlowQueriesClear",
+    "RelativePath": "api/admin/slow-queries/clear",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "GetUsers",
+    "RelativePath": "api/admin/users",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostUsers",
+    "RelativePath": "api/admin/users",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Admin.CreateUserRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PutUsers",
+    "RelativePath": "api/admin/users/{id}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Admin.UpdateUserRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "DeleteUsers",
+    "RelativePath": "api/admin/users/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "GetIdentityProof",
+    "RelativePath": "api/admin/users/{id}/identity",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostIdentityProofFetch",
+    "RelativePath": "api/admin/users/{id}/identity/fetch",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostLock",
+    "RelativePath": "api/admin/users/{id}/lock",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Admin.LockUserRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostPassword",
+    "RelativePath": "api/admin/users/{id}/password",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Admin.SetPasswordRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostResetLink",
+    "RelativePath": "api/admin/users/{id}/reset-link",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostResetVerification",
+    "RelativePath": "api/admin/users/{id}/reset-verification",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Admin.UserAdminController",
+    "Method": "PostUnlock",
+    "RelativePath": "api/admin/users/{id}/unlock",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "GetAiStatus",
+    "RelativePath": "api/ai/status",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.ApplicationController",
+    "Method": "GetApplications",
+    "RelativePath": "api/applications/{id}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.ApplicationController",
+    "Method": "PostApplicationsDecide",
+    "RelativePath": "api/applications/{id}/decide",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.DecideRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.ApplicationController",
+    "Method": "GetApplicationsMine",
+    "RelativePath": "api/applications/mine",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "DeleteAttachments",
+    "RelativePath": "api/attachments/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "PutAttachmentsContent",
+    "RelativePath": "api/attachments/{id}/content",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "GetAttachmentsDownload",
+    "RelativePath": "api/attachments/{id}/download",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "GetAttachmentsText",
+    "RelativePath": "api/attachments/{id}/text",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "GetAttachmentsView",
+    "RelativePath": "api/attachments/{id}/view",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostAcceptTerms",
+    "RelativePath": "api/auth/accept-terms",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostChangePassword",
+    "RelativePath": "api/auth/change-password",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.ChangePasswordRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostConfirm",
+    "RelativePath": "api/auth/confirm",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.ConfirmRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostForgotPassword",
+    "RelativePath": "api/auth/forgot-password",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.ForgotPasswordRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostLogin",
+    "RelativePath": "api/auth/login",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.LoginRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostLogout",
+    "RelativePath": "api/auth/logout",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "GetMe",
+    "RelativePath": "api/auth/me",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostRegister",
+    "RelativePath": "api/auth/register",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.RegisterRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostResendCode",
+    "RelativePath": "api/auth/resend-code",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostResetPassword",
+    "RelativePath": "api/auth/reset-password",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.ResetPasswordRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "GetTheme",
+    "RelativePath": "api/auth/theme",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PutTheme",
+    "RelativePath": "api/auth/theme",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.UserThemeRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostToken",
+    "RelativePath": "api/auth/token",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.LoginRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostTokenRefresh",
+    "RelativePath": "api/auth/token/refresh",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.RefreshRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Auth.AuthController",
+    "Method": "PostTokenRevoke",
+    "RelativePath": "api/auth/token/revoke",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Auth.RefreshRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetAvatars",
+    "RelativePath": "api/avatars/{id}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.AwardController",
+    "Method": "PostAwardsPaid",
+    "RelativePath": "api/awards/{id}/paid",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.RatingController",
+    "Method": "PutAwardsRating",
+    "RelativePath": "api/awards/{id}/rating",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.RateRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Preview.CheckpointBuildController",
+    "Method": "GetCheckpointsBuild",
+    "RelativePath": "api/checkpoints/{id}/build",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Preview.CheckpointBuildController",
+    "Method": "GetCheckpointsBuildLog",
+    "RelativePath": "api/checkpoints/{id}/build-log",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Dashboard.DashboardController",
+    "Method": "GetDashboard",
+    "RelativePath": "api/dashboard",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "tz",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "PostEntriesAiDigest",
+    "RelativePath": "api/entries/{id}/ai/digest",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "GetEntriesAiDigest",
+    "RelativePath": "api/entries/{id}/ai/digest",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.EntryController",
+    "Method": "PostEntriesRemove",
+    "RelativePath": "api/entries/{id}/remove",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.RemoveEntryRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "PostEntriesSubmissions",
+    "RelativePath": "api/entries/{id}/submissions",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Storage.ReserveSubmissionRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "GetEntriesSubmissions",
+    "RelativePath": "api/entries/{id}/submissions",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.EntryController",
+    "Method": "PostEntriesWithdraw",
+    "RelativePath": "api/entries/{id}/withdraw",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.WithdrawEntryRequest",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.EntryZipController",
+    "Method": "PostEntriesZip",
+    "RelativePath": "api/entries/{id}/zip",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.EntryController",
+    "Method": "GetEntriesMine",
+    "RelativePath": "api/entries/mine",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.GitHub.GitHubAuthController",
+    "Method": "GetGithubCallback",
+    "RelativePath": "api/github/callback",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "code",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "state",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.GitHub.GitHubAuthController",
+    "Method": "GetGithubConnect",
+    "RelativePath": "api/github/connect",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "next",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "Program\u002B\u003C\u003Ec",
+    "Method": "\u003C\u003CMain\u003E$\u003Eb__0_21",
+    "RelativePath": "api/health",
+    "HttpMethod": "GET",
+    "IsController": false,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "System.Void",
+        "MediaTypes": [],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Help.HelpController",
+    "Method": "GetHelp",
+    "RelativePath": "api/help",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Identity.IdentityController",
+    "Method": "PostRefresh",
+    "RelativePath": "api/identity/refresh",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Identity.IdentityController",
+    "Method": "PostSession",
+    "RelativePath": "api/identity/session",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Identity.IdentityController",
+    "Method": "GetStatus",
+    "RelativePath": "api/identity/status",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "GetNotifications",
+    "RelativePath": "api/notifications",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "PutNotifications",
+    "RelativePath": "api/notifications",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Notifications.NotificationPreferencesRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "PostDevices",
+    "RelativePath": "api/notifications/devices",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Notifications.RegisterDeviceRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "DeleteDevices",
+    "RelativePath": "api/notifications/devices/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "GetInbox",
+    "RelativePath": "api/notifications/inbox",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "cursor",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "take",
+        "Type": "System.Nullable\u00601[[System.Int32, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "PutInbox",
+    "RelativePath": "api/notifications/inbox",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Notifications.InboxMarkRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "PutInboxLine",
+    "RelativePath": "api/notifications/inbox/{id}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Notifications.InboxMarkRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Notifications.NotificationController",
+    "Method": "PostUnsubscribe",
+    "RelativePath": "api/notifications/unsubscribe",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Notifications.UnsubscribeRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "GetOpportunities",
+    "RelativePath": "api/opportunities",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "status",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "q",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "category",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "subcategory",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "sort",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "fit",
+        "Type": "System.Nullable\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      },
+      {
+        "Name": "cursor",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "limit",
+        "Type": "System.Nullable\u00601[[System.Int32, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "PostOpportunities",
+    "RelativePath": "api/opportunities",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.OpportunityUpsertRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "PutOpportunities",
+    "RelativePath": "api/opportunities/{id}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.OpportunityUpsertRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "PostOpportunitiesAiByIdGuidByFeature",
+    "RelativePath": "api/opportunities/{id}/ai/{feature}",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "feature",
+        "Type": "System.String",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "GetOpportunitiesAi",
+    "RelativePath": "api/opportunities/{id}/ai/{feature}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "feature",
+        "Type": "System.String",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "PostOpportunitiesAiStanding",
+    "RelativePath": "api/opportunities/{id}/ai/standing",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "GetOpportunitiesAiStanding",
+    "RelativePath": "api/opportunities/{id}/ai/standing",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "PostOpportunitiesAttachments",
+    "RelativePath": "api/opportunities/{id}/attachments",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Storage.ReserveAttachmentRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.AttachmentController",
+    "Method": "GetOpportunitiesAttachments",
+    "RelativePath": "api/opportunities/{id}/attachments",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.AwardController",
+    "Method": "PostOpportunitiesAward",
+    "RelativePath": "api/opportunities/{id}/award",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.AnnounceRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.CancelController",
+    "Method": "PostOpportunitiesCancel",
+    "RelativePath": "api/opportunities/{id}/cancel",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.CancelRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "PostPublish",
+    "RelativePath": "api/opportunities/{id}/publish",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "GetOpportunitiesBySlug",
+    "RelativePath": "api/opportunities/{slug}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "slug",
+        "Type": "System.String",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.ApplicationController",
+    "Method": "PostOpportunitiesAiApproach",
+    "RelativePath": "api/opportunities/{slug}/ai/approach",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "slug",
+        "Type": "System.String",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.ApproachDraftRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.ApplicationController",
+    "Method": "PostOpportunitiesApplications",
+    "RelativePath": "api/opportunities/{slug}/applications",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "slug",
+        "Type": "System.String",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Opportunities.ApplyRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.ApplicationController",
+    "Method": "GetOpportunitiesApply",
+    "RelativePath": "api/opportunities/{slug}/apply",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "slug",
+        "Type": "System.String",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "PostOpportunitiesAi",
+    "RelativePath": "api/opportunities/ai/{feature}",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "feature",
+        "Type": "System.String",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Ai.OpportunityFormSnapshot",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "GetCategories",
+    "RelativePath": "api/opportunities/categories",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "GetMine",
+    "RelativePath": "api/opportunities/mine",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Opportunities.OpportunityController",
+    "Method": "GetStats",
+    "RelativePath": "api/opportunities/stats",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Preview.PreviewController",
+    "Method": "GetPreview",
+    "RelativePath": "api/previews/{id}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Preview.PreviewController",
+    "Method": "PostPreview",
+    "RelativePath": "api/previews/{id}",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Preview.PreviewController",
+    "Method": "DeletePreview",
+    "RelativePath": "api/previews/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Preview.PreviewController",
+    "Method": "GetPreviewOpen",
+    "RelativePath": "api/previews/{id}/open",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetProfile",
+    "RelativePath": "api/profile",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "PutProfile",
+    "RelativePath": "api/profile",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Profiles.ProfileRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetProfileByUserIdGuid",
+    "RelativePath": "api/profile/{userId}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "userId",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "GetProfileAiReview",
+    "RelativePath": "api/profile/ai/review",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Ai.AiController",
+    "Method": "PostProfileAiSummary",
+    "RelativePath": "api/profile/ai/summary",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Ai.ProfileSummaryRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetPaymentMethods",
+    "RelativePath": "api/profile/payment-methods",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetSuggestions",
+    "RelativePath": "api/profile/suggestions",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetWelcome",
+    "RelativePath": "api/profile/welcome",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Profiles.ProfileController",
+    "Method": "GetProjectImages",
+    "RelativePath": "api/project-images/{id}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.PublicController",
+    "Method": "GetPublicBrandImage",
+    "RelativePath": "api/public/{slot}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "slot",
+        "Type": "System.String",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.PublicController",
+    "Method": "GetPublicBranding",
+    "RelativePath": "api/public/branding",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Leaderboard.LeaderboardController",
+    "Method": "GetPublicLeaderboard",
+    "RelativePath": "api/public/leaderboard",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "tab",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "by",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "region",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "category",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.PublicController",
+    "Method": "GetPublicPrivacy",
+    "RelativePath": "api/public/privacy",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Leaderboard.TalentController",
+    "Method": "GetPublicTalent",
+    "RelativePath": "api/public/talent",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "category",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "region",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "merit",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "availability",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "experience",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "wins",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.PublicController",
+    "Method": "GetPublicTerms",
+    "RelativePath": "api/public/terms",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Reports.ReportController",
+    "Method": "GetApplications",
+    "RelativePath": "api/reports/applications",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Reports.ReportController",
+    "Method": "GetEntries",
+    "RelativePath": "api/reports/entries",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Reports.ReportController",
+    "Method": "GetOpportunities",
+    "RelativePath": "api/reports/opportunities",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "GetSettings",
+    "RelativePath": "api/settings",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PutSettings",
+    "RelativePath": "api/settings",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Settings.UpdateSettingsRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostIcon",
+    "RelativePath": "api/settings/icon",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "file",
+        "Type": "Microsoft.AspNetCore.Http.IFormFile",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "DeleteIcon",
+    "RelativePath": "api/settings/icon",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "GetJwtStatus",
+    "RelativePath": "api/settings/jwt-status",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostLogo",
+    "RelativePath": "api/settings/logo",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "file",
+        "Type": "Microsoft.AspNetCore.Http.IFormFile",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "DeleteLogo",
+    "RelativePath": "api/settings/logo",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "GetRedisStatus",
+    "RelativePath": "api/settings/redis-status",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostRevokeSessions",
+    "RelativePath": "api/settings/revoke-sessions",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestAi",
+    "RelativePath": "api/settings/test-ai",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestEmail",
+    "RelativePath": "api/settings/test-email",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestGithub",
+    "RelativePath": "api/settings/test-github",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestIdentity",
+    "RelativePath": "api/settings/test-identity",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestPhone",
+    "RelativePath": "api/settings/test-phone",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      },
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Api.Settings.TestPhoneRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestPreview",
+    "RelativePath": "api/settings/test-preview",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Settings.SettingsController",
+    "Method": "PostTestStorage",
+    "RelativePath": "api/settings/test-storage",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "setup",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Setup.SetupController",
+    "Method": "PostSetup",
+    "RelativePath": "api/setup",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Setup.SetupRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Setup.SetupController",
+    "Method": "PostDatabaseTest",
+    "RelativePath": "api/setup/database/test",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "WinnersPortal.Services.Database.DatabaseTargetRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Setup.SetupController",
+    "Method": "GetDefaults",
+    "RelativePath": "api/setup/defaults",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Setup.SetupController",
+    "Method": "GetStatus",
+    "RelativePath": "api/setup/status",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "DeleteSubmissions",
+    "RelativePath": "api/submissions/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "PutSubmissionsContent",
+    "RelativePath": "api/submissions/{id}/content",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "GetSubmissionsDownload",
+    "RelativePath": "api/submissions/{id}/download",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "GetSubmissionsText",
+    "RelativePath": "api/submissions/{id}/text",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Storage.SubmissionController",
+    "Method": "GetSubmissionsView",
+    "RelativePath": "api/submissions/{id}/view",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Guid",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.GitHub.GitHubWebhookController",
+    "Method": "PostWebhooksGithub",
+    "RelativePath": "api/webhooks/github",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "WinnersPortal.Api.Identity.IdentityWebhookController",
+    "Method": "PostWebhooksIdentity",
+    "RelativePath": "api/webhooks/identity",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  }
+]

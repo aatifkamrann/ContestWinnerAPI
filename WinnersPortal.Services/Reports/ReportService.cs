@@ -21,7 +21,7 @@ namespace WinnersPortal.Services.Reports;
 /// The applications and entries reports are the rest of this class, in
 /// ReportService.Applications.cs and ReportService.Entries.cs.
 /// </summary>
-public sealed partial class ReportService(AppDbContext db)
+public sealed partial class ReportService(AppDbContext db, Preview.BuildHostService buildHost)
 {
     /// <summary>Whose opportunities the report covers.</summary>
     public enum Scope { All, Posted, Entered }

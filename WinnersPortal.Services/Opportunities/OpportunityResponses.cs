@@ -31,6 +31,8 @@ public sealed record OpportunityCard
     public required DateTimeOffset? PublishedAtUtc { get; init; }
     public required string Status { get; init; }
     public required string Delivery { get; init; }
+    /// <summary>"competitive" or "milestones" — one hired freelancer, paid milestone by milestone.</summary>
+    public required string Kind { get; init; }
     /// <summary>Entries must run with Docker Compose: each claim is built, and the board says whether it did.</summary>
     public required bool RequiresCompose { get; init; }
     public required string ClientName { get; init; }
@@ -96,6 +98,8 @@ public sealed record OpportunityDetail
     public required string Currency { get; init; }
     public required string Status { get; init; }
     public required string Delivery { get; init; }
+    /// <summary>"competitive" or "milestones" — see <see cref="MilestonePay"/>.</summary>
+    public required string Kind { get; init; }
     public required bool RequiresCompose { get; init; }
     public required DateTimeOffset? DeadlineUtc { get; init; }
     public required DateTimeOffset? EntryCloseUtc { get; init; }
@@ -169,6 +173,8 @@ public sealed record OpportunityMilestoneView
     public required string? Description { get; init; }
     public required DateTimeOffset? DueUtc { get; init; }
     public required int? WeightPercent { get; init; }
+    /// <summary>What the milestone pays, paid by milestone; null on a competitive opportunity.</summary>
+    public required decimal? Amount { get; init; }
 }
 
 /// <summary>A requirement of the brief.</summary>
@@ -327,6 +333,34 @@ public sealed record OpportunityAward
     public required DateTimeOffset? HandoverVerifiedAtUtc { get; init; }
     public required string? HandoverNote { get; init; }
     public required string? WinnerRepoFullName { get; init; }
+    /// <summary>
+    /// Paid by milestone: each milestone's review and payment, in order —
+    /// as public as the award's own paid line; the ids and the client's
+    /// notes only for the owner and the hired freelancer. Null on a
+    /// competitive opportunity.
+    /// </summary>
+    public required IReadOnlyList<MilestonePaymentView>? Payments { get; init; }
+    /// <summary>Paid by milestone: how much of the total is paid, and how much is approved and owed.</summary>
+    public required decimal? AmountPaid { get; init; }
+    public required decimal? AmountOwed { get; init; }
+}
+
+/// <summary>One milestone of an opportunity paid by milestone: where it stands, and when each step happened.</summary>
+public sealed record MilestonePaymentView
+{
+    /// <summary>1-based, like the tags.</summary>
+    public required int Number { get; init; }
+    public required string State { get; init; }
+    public required decimal? Amount { get; init; }
+    public required DateTimeOffset? SubmittedAtUtc { get; init; }
+    public required DateTimeOffset? ApprovedAtUtc { get; init; }
+    public required DateTimeOffset? PaidAtUtc { get; init; }
+    /// <summary>The claim the client acts on; the owner's and the hired freelancer's alone.</summary>
+    public required Guid? CheckpointId { get; init; }
+    /// <summary>What it was handed in as — the tag, branch or file.</summary>
+    public required string? Ref { get; init; }
+    public required string? ChangesNote { get; init; }
+    public required DateTimeOffset? ChangesRequestedAtUtc { get; init; }
 }
 
 /// <summary>A rating one party of an award left for the other.</summary>

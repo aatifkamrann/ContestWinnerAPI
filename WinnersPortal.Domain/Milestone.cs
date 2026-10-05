@@ -33,4 +33,11 @@ public sealed class Milestone
     /// of the board's, whose standing counts milestones, not shares.
     /// </summary>
     public int? WeightPercent { get; set; }
+
+    /// <summary>
+    /// What this milestone pays, in the opportunity's currency — only on an
+    /// opportunity paid by milestone, where every milestone has one and they
+    /// add up to the award. Null on a competitive one.
+    /// </summary>
+    public decimal? Amount { get; set; }
 }

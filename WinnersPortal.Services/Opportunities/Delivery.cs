@@ -63,8 +63,21 @@ public static class Delivery
     /// moment the deadline passes — what was handed in by then is what is
     /// judged, and a file that arrives afterwards is not part of the entry.
     /// </summary>
-    public static string? UploadProblem(OpportunityStatus status, DateTimeOffset? deadlineUtc, DateTimeOffset now)
+    public static string? UploadProblem(
+        OpportunityStatus status, DateTimeOffset? deadlineUtc, DateTimeOffset now,
+        OpportunityKind kind = OpportunityKind.Competitive, bool complete = false)
     {
+        // Paid by milestone, files land while the hired freelancer is at
+        // work — the milestones' own dates say whether they are on time —
+        // and stop once every milestone is paid.
+        if (MilestonePay.ByMilestone(kind))
+            return status switch
+            {
+                OpportunityStatus.Awarded when !complete => null,
+                OpportunityStatus.Awarded => "Every milestone is paid; the work is complete.",
+                OpportunityStatus.Cancelled => "This opportunity was cancelled; nothing more can be handed in.",
+                _ => "Files are handed in once the client has hired someone.",
+            };
         if (status == OpportunityStatus.Open && (deadlineUtc is null || deadlineUtc > now)) return null;
         return status switch
         {

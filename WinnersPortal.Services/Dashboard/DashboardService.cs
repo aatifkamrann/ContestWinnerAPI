@@ -27,7 +27,7 @@ namespace WinnersPortal.Services.Dashboard;
 /// opportunity, entry, award and webhook flows already wrote. A dashboard that
 /// keeps its own totals is a dashboard that drifts.
 /// </summary>
-public sealed partial class DashboardService(AppDbContext db, GitHubService github)
+public sealed partial class DashboardService(AppDbContext db, GitHubService github, Preview.BuildHostService buildHost)
 {
     /// <summary>The activity window every chart shares, in days.</summary>
     private const int WindowDays = 30;
@@ -47,8 +47,8 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
         return principal.IsInRole(Roles.Admin)
             ? Outcome.Ok<DashboardResponse>(await AdminAsync(db, now, from, since, zone, ct))
             : principal.IsInRole(Roles.Client)
-                ? Outcome.Ok<DashboardResponse>(await ClientAsync(db, github, userId, now, from, since, zone, ct))
-                : Outcome.Ok<DashboardResponse>(await FreelancerAsync(db, userId, now, from, since, zone, ct));
+                ? Outcome.Ok<DashboardResponse>(await ClientAsync(db, github, userId, now, from, since, zone, await buildHost.ReadyAsync(ct), ct))
+                : Outcome.Ok<DashboardResponse>(await FreelancerAsync(db, userId, now, from, since, zone, await buildHost.ReadyAsync(ct), ct));
     }
 
     // =====================================================================
@@ -57,7 +57,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
 
     private static async Task<ClientDashboard> ClientAsync(
         AppDbContext db, GitHubService github, Guid userId, DateTimeOffset now, DateOnly from, DateTimeOffset since,
-        TimeZoneInfo zone, CancellationToken ct)
+        TimeZoneInfo zone, bool buildsOn, CancellationToken ct)
     {
         // The seven reads, in the LINQ or the T-SQL; the newest two hundred
         // opportunities and everything hanging off them.
@@ -71,7 +71,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
         var standings = await StandingReader.ForOpportunitiesAsync(
             db,
             opportunities.Where(c => c.Status is OpportunityStatus.Open or OpportunityStatus.Reviewing).Select(c => c.Id).ToList(),
-            now, ct);
+            now, buildsOn, ct);
         var leaders = standings.Values
             .GroupBy(r => r.OpportunityId)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Rank).First());
@@ -87,10 +87,19 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
         var awardedOpportunityIds = awards.Select(a => a.OpportunityId).ToHashSet();
         var attention = new List<AttentionItem>();
 
-        foreach (var a in awards.Where(a => a.PaidAtUtc is null))
+        foreach (var a in awards.Where(a => a.PaidAtUtc is null && a.Kind == OpportunityKind.Competitive))
             attention.Add(Item("award_unpaid", "danger",
                 $"Pay the award for “{a.Title}”",
                 $"{a.Winner} was announced {Ago(now, a.AnnouncedAtUtc)}. The repository transfers when you mark it paid.",
+                $"/opportunities/{a.Slug}"));
+
+        // Paid by milestone, the job waits on the client whenever a milestone
+        // is handed in: to approve it (or ask for changes) and to pay it.
+        foreach (var a in awards.Where(a => a.Kind == OpportunityKind.Milestones && a.PaidAtUtc is null && a.Waiting > 0))
+            attention.Add(Item("milestone_waiting", "danger",
+                $"A milestone waits on you on “{a.Title}”",
+                $"{a.Winner} handed in {(a.Waiting == 1 ? "a milestone" : $"{a.Waiting} milestones")}. Approve it, or ask for "
+                + "changes, and mark it paid once you have paid: the next milestone opens only then.",
                 $"/opportunities/{a.Slug}"));
 
         // Where the reading happens depends on the portal: with the GitHub
@@ -168,7 +177,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
             // longest-waiting first — the tile links straight to a lone one.
             Waiting = waiting
                 .Select(w => new WaitingReview { Slug = w.Slug, Title = w.Title, Count = w.Count, OldestUtc = w.Oldest }),
-            Money = Money(awards.Select(a => (a.Currency, a.Amount, a.PaidAtUtc))),
+            Money = Money(awards.SelectMany(a => Owed(a.Kind, a.Currency, a.Amount, a.PaidAtUtc, a.PaidSoFar))),
             Activity = new DailyChart
             {
                 Labels = Labels(from, WindowDays),
@@ -225,7 +234,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
 
     private static async Task<FreelancerDashboard> FreelancerAsync(
         AppDbContext db, Guid userId, DateTimeOffset now, DateOnly from, DateTimeOffset since, TimeZoneInfo zone,
-        CancellationToken ct)
+        bool buildsOn, CancellationToken ct)
     {
         // The four reads, in the LINQ or the T-SQL; the newest two hundred
         // entries and everything hanging off them.
@@ -248,7 +257,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
             db,
             contested.Where(e => e.OpportunityStatus is OpportunityStatus.Open or OpportunityStatus.Reviewing)
                 .Select(e => e.OpportunityId).Distinct().ToList(),
-            now, ct);
+            now, buildsOn, ct);
 
         // ---- what needs the freelancer's attention -----------------------
         var attention = new List<AttentionItem>();
@@ -259,7 +268,13 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 "The award is paid and the transfer is waiting on GitHub — accept it there and the repo is yours.",
                 $"/opportunities/{a.Slug}"));
 
-        foreach (var a in awards.Where(a => a.PaidAtUtc is null))
+        foreach (var a in awards.Where(a => a.Kind == OpportunityKind.Milestones && a.PaidAtUtc is null && a.ChangesAsked > 0))
+            attention.Add(Item("milestone_changes", "warn",
+                $"Changes asked for on “{a.Title}”",
+                "The client sent a milestone back with what to change. Make the changes, then hand it in again from the opportunity page.",
+                $"/opportunities/{a.Slug}"));
+
+        foreach (var a in awards.Where(a => a.PaidAtUtc is null && a.Kind == OpportunityKind.Competitive))
             attention.Add(Item("award_unpaid", "info",
                 $"You won “{a.Title}” — payment pending",
                 $"Announced {Ago(now, a.AnnouncedAtUtc)}. The repository transfers to the client once they confirm payment.",
@@ -295,7 +310,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 Pushes = entries.Sum(e => e.PushCount),
                 RepoIssues = contested.Count(e => e.ProvisionStatus == RepoProvisionStatus.Failed),
             },
-            Money = Money(awards.Select(a => (a.Currency, a.Amount, a.PaidAtUtc))),
+            Money = Money(awards.SelectMany(a => Owed(a.Kind, a.Currency, a.Amount, a.PaidAtUtc, a.PaidSoFar))),
             Activity = new DailyChart
             {
                 Labels = Labels(from, WindowDays),
@@ -422,7 +437,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 $"Repo provisioning failed for @{f.GithubUsername}",
                 $"“{f.Title}” · {f.ProvisionAttempts} attempt{(f.ProvisionAttempts == 1 ? "" : "s")} · "
                 + (f.ProvisionNote ?? "no reason recorded"),
-                "/admin/operations#repositories"));
+                "/admin/operations/repositories"));
 
         // Two different failures wear the same "not verified" badge, and they
         // need different responses: a transfer that fired and is waiting on the
@@ -435,7 +450,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 $"Paid {Ago(now, a.PaidAtUtc!.Value)} and transferred to @{a.TransferTargetLogin}, "
                 + "but a re-read has not seen the new owner yet."
                 + (a.HandoverNote is null ? "" : $" {a.HandoverNote}"),
-                "/admin/operations#handovers"));
+                "/admin/operations/awards"));
 
         foreach (var a in awards.Where(a => a.PaidAtUtc is not null && a.Handover == HandoverStatus.NotStarted))
             attention.Add(Item("handover_none", "danger",
@@ -443,13 +458,23 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 $"{a.Client} paid {Ago(now, a.PaidAtUtc!.Value)} but no transfer was requested — "
                 + (a.HandoverNote ?? "no reason recorded")
                 + " The winner's code is still owned by the portal.",
-                "/admin/operations#handovers"));
+                "/admin/operations/awards"));
 
-        foreach (var a in awards.Where(a => a.PaidAtUtc is null && a.AnnouncedAtUtc <= now.AddDays(-7)))
+        foreach (var a in awards.Where(a => a.PaidAtUtc is null && a.Kind == OpportunityKind.Competitive && a.AnnouncedAtUtc <= now.AddDays(-7)))
             attention.Add(Item("award_unpaid", "warn",
                 $"Award unpaid for {Ago(now, a.AnnouncedAtUtc)} on “{a.Title}”",
                 $"{a.Client} announced {a.Winner} as winner. Nothing transfers until the payment is confirmed.",
                 $"/opportunities/{a.Slug}"));
+
+        // A member's report waits on an administrator and nobody else.
+        var reports = await WinnersPortal.Services.Chat.ChatModerationService.OpenReportsAsync(db, ct);
+        if (reports.Conversations > 0)
+            attention.Add(Item("chat_reported", "warn",
+                $"{reports.Conversations} reported conversation{(reports.Conversations == 1 ? "" : "s")} to review",
+                $"{reports.Reports} open report{(reports.Reports == 1 ? "" : "s")}"
+                + (reports.OldestUtc is { } oldest ? $", the oldest made {Ago(now, oldest)}." : ".")
+                + " Read the conversation, act if it needs it, and mark it reviewed.",
+                "/admin/conversations?reported=1"));
 
         var unmatched = deliveries.Count(d =>
             d.HandledNote != null && d.HandledNote.Contains("no matching", StringComparison.OrdinalIgnoreCase));
@@ -457,7 +482,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
             attention.Add(Item("webhooks", "info",
                 $"{unmatched} webhook deliver{(unmatched == 1 ? "y" : "ies")} matched no entry",
                 "Usually a repository outside the portal, or one whose entry was withdrawn. A persistent count means a rename went unnoticed.",
-                "/admin/operations#deliveries"));
+                "/admin/operations/webhooks"));
 
         return new AdminDashboard
         {
@@ -489,7 +514,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 Count = w.Count,
                 OldestUtc = w.Oldest,
             }),
-            Money = Money(awards.Select(a => (a.Currency, a.Amount, a.PaidAtUtc))),
+            Money = Money(awards.SelectMany(a => Owed(a.Kind, a.Currency, a.Amount, a.PaidAtUtc, a.PaidSoFar))),
             Activity = new DailyChart
             {
                 Labels = Labels(from, WindowDays),
@@ -537,7 +562,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 Entrants = c.Entrants,
                 AwardsAnnounced = awards.Count(a => a.ClientId == c.ClientId),
                 AwardsPaid = awards.Count(a => a.ClientId == c.ClientId && a.PaidAtUtc is not null),
-                PaidValue = awards.Where(a => a.ClientId == c.ClientId && a.PaidAtUtc is not null).Sum(a => a.Amount),
+                PaidValue = awards.Where(a => a.ClientId == c.ClientId).Sum(a => PaidOf(a.Kind, a.Amount, a.PaidAtUtc, a.PaidSoFar)),
                 Currency = awards.FirstOrDefault(a => a.ClientId == c.ClientId)?.Currency ?? "USD",
                 LastPostedUtc = c.LastPosted,
             }),
@@ -549,7 +574,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                 Claims = f.Claims,
                 Pushes = f.Pushes,
                 Wins = awards.Count(a => a.WinnerId == f.FreelancerId),
-                Earned = awards.Where(a => a.WinnerId == f.FreelancerId && a.PaidAtUtc is not null).Sum(a => a.Amount),
+                Earned = awards.Where(a => a.WinnerId == f.FreelancerId).Sum(a => PaidOf(a.Kind, a.Amount, a.PaidAtUtc, a.PaidSoFar)),
                 Currency = awards.FirstOrDefault(a => a.WinnerId == f.FreelancerId)?.Currency ?? "USD",
             }),
             Attention = attention,
@@ -562,7 +587,7 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
                     Text = $"{d.Event} · {d.RepoFullName ?? "no repository"}",
                     Detail = d.HandledNote ?? "received",
                     // A delivery has no page of its own; the console lists it, and can replay it.
-                    Href = "/admin/operations#deliveries",
+                    Href = "/admin/operations/webhooks",
                 }),
         };
     }
@@ -626,6 +651,20 @@ public sealed partial class DashboardService(AppDbContext db, GitHubService gith
     /// Award totals per currency. Opportunities carry their own currency, so one
     /// summed number would quietly add rupees to dollars.
     /// </summary>
+    /// <summary>
+    /// An award as money: paid or owed whole — or, paid by milestone and not
+    /// yet complete, the milestones paid so far as paid and the rest as owed.
+    /// </summary>
+    private static IEnumerable<(string Currency, decimal Amount, DateTimeOffset? PaidAtUtc)> Owed(
+        OpportunityKind kind, string currency, decimal amount, DateTimeOffset? paidAtUtc, decimal paidSoFar) =>
+        kind == OpportunityKind.Milestones && paidAtUtc is null
+            ? [(currency, paidSoFar, DateTimeOffset.UnixEpoch), (currency, amount - paidSoFar, null)]
+            : [(currency, amount, paidAtUtc)];
+
+    /// <summary>What of an award has been paid: all of it once paid, the milestones paid so far before that.</summary>
+    private static decimal PaidOf(OpportunityKind kind, decimal amount, DateTimeOffset? paidAtUtc, decimal paidSoFar) =>
+        paidAtUtc is not null ? amount : kind == OpportunityKind.Milestones ? paidSoFar : 0;
+
     private static MoneyTotals[] Money(IEnumerable<(string Currency, decimal Amount, DateTimeOffset? PaidAtUtc)> awards) =>
         awards.GroupBy(a => a.Currency, StringComparer.Ordinal)
             .OrderByDescending(g => g.Sum(a => a.Amount))

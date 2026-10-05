@@ -57,7 +57,7 @@ public sealed class AiController(AiService aiService) : ControllerBase
     [HttpPost("api/opportunities/ai/{feature}")]
     [Authorize(Policy = "client")]
     public async Task<IResult> PostOpportunitiesAi(string feature, OpportunityFormSnapshot request, CancellationToken ct) =>
-        (await aiService.DraftBriefFieldAsync(feature, request, ct)).ToResult();
+        (await aiService.DraftBriefFieldAsync(feature, request, User, ct)).ToResult();
 
     // The one tool that reads the profile form: a first draft of the
     // member's About, from what they have typed so far — title, skills,

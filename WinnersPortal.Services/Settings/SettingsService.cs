@@ -24,6 +24,9 @@ public sealed class SettingsService
     private readonly RedisConnection _redis;
     private readonly ILogger<SettingsService> _log;
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>What secret values are protected under; a database test opens one with it to know the database is this portal's.</summary>
+    public const string ProtectorPurpose = "WinnersPortal.Settings";
     private volatile Dictionary<string, string?>? _cache;
 
     public SettingsService(
@@ -33,7 +36,7 @@ public sealed class SettingsService
         ILogger<SettingsService> log)
     {
         _scopes = scopes;
-        _protector = dataProtection.CreateProtector("WinnersPortal.Settings");
+        _protector = dataProtection.CreateProtector(ProtectorPurpose);
         _redis = redis;
         _log = log;
         // Optional by contract, so a configured-but-unreachable Redis must not
@@ -54,15 +57,39 @@ public sealed class SettingsService
 
     public void Invalidate() => _cache = null;
 
-    /// <summary>Resolved value: environment variable → stored row → default.</summary>
+    /// <summary>Resolved value: stored row → environment variable → default (<see cref="Resolve"/>).</summary>
     public async Task<string?> GetAsync(string key, CancellationToken ct = default)
     {
         var def = SettingsRegistry.Find(key)
             ?? throw new ArgumentException($"Unknown setting '{key}'.", nameof(key));
-        var env = Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(key));
-        if (env is not null) return env;
         var stored = await LoadAsync(ct);
-        return stored.TryGetValue(key, out var value) && value is not null ? value : def.Default;
+        return Resolve(def, EnvOf(key), stored.GetValueOrDefault(key));
+    }
+
+    /// <summary>
+    /// A value from its three sources. What is saved wins. Blank is not a
+    /// value, so a cleared field falls through to the environment variable
+    /// (<c>WP_&lt;GROUP&gt;_&lt;KEY&gt;</c>), which is a deployment's starting
+    /// value and never a lock, and then to the default.
+    /// </summary>
+    public static string? Resolve(SettingDefinition def, string? env, string? stored) =>
+        !string.IsNullOrEmpty(stored) ? stored : env ?? def.Default;
+
+    /// <summary>The key's environment variable, when the deployment sets one.</summary>
+    public static string? EnvOf(string key) => Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(key));
+
+    /// <summary>Where a value comes from: saved on the screen, the deployment's environment, or the default.</summary>
+    public static SettingSource SourceOf(string? env, string? stored) =>
+        !string.IsNullOrEmpty(stored) ? SettingSource.Saved
+        : env is not null ? SettingSource.Environment
+        : SettingSource.Default;
+
+    /// <summary>Where this key's value comes from now.</summary>
+    public async Task<SettingSource> SourceAsync(string key, CancellationToken ct = default)
+    {
+        _ = SettingsRegistry.Find(key) ?? throw new ArgumentException($"Unknown setting '{key}'.", nameof(key));
+        var stored = await LoadAsync(ct);
+        return SourceOf(EnvOf(key), stored.GetValueOrDefault(key));
     }
 
     public async Task<bool> IsSetupCompletedAsync(CancellationToken ct = default) =>
@@ -72,20 +99,11 @@ public sealed class SettingsService
 
     /// <summary>
     /// A connection's setups as ids, names and states, at most one of them
-    /// active. The main setup cannot be listed away while an environment
-    /// variable still sets one of its values: the deployment says it exists,
-    /// so it is shown whatever the stored list says — and active, when no
-    /// other setup is.
+    /// active — the saved list, which wins like any saved value: a setup
+    /// removed on the screen stays removed whatever the environment sets.
     /// </summary>
-    public async Task<IReadOnlyList<SetupEntry>> ListAsync(SetupKind kind, CancellationToken ct = default)
-    {
-        var list = Setups.Parse(await GetAsync(kind.ListKey, ct));
-        if (list.Any(s => s.Id == Setups.MainId) || !kind.Fields.Any(IsLocked)) return list;
-        var name = list.Any(s => string.Equals(s.Name, Setups.MainName, StringComparison.OrdinalIgnoreCase))
-            ? "Main (environment)"
-            : Setups.MainName;
-        return [.. list, new SetupEntry(Setups.MainId, name, list.All(s => !s.Enabled))];
-    }
+    public async Task<IReadOnlyList<SetupEntry>> ListAsync(SetupKind kind, CancellationToken ct = default) =>
+        Setups.Parse(await GetAsync(kind.ListKey, ct));
 
     /// <summary>The active setup of a connection with its values resolved, or null while none is active.</summary>
     public async Task<SetupValues?> ActiveSetupAsync(SetupKind kind, CancellationToken ct = default) =>
@@ -117,18 +135,15 @@ public sealed class SettingsService
         return new SetupValues(entry.Id, entry.Name, entry.Enabled, values);
     }
 
-    /// <summary>Whether an environment variable sets this key, so the deployment rather than the screen decides it.</summary>
-    public static bool IsLocked(string key) =>
-        Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(key)) is not null;
-
     /// <summary>Everything the admin settings screen shows. Secret values never leave as plaintext.</summary>
     public async Task<List<SettingsGroupDto>> GetForAdminAsync(CancellationToken ct = default)
     {
         var stored = await LoadAsync(ct);
         SettingDto Dto(SettingDefinition d)
         {
-            var env = Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(d.Key));
-            var resolved = env ?? stored.GetValueOrDefault(d.Key) ?? d.Default;
+            var env = EnvOf(d.Key);
+            var saved = stored.GetValueOrDefault(d.Key);
+            var resolved = Resolve(d, env, saved);
             return new SettingDto(
                 Key: d.Key,
                 Label: d.Label,
@@ -136,7 +151,12 @@ public sealed class SettingsService
                 IsBoolean: d.IsBoolean,
                 IsMultiline: d.IsMultiline,
                 Choices: d.Choices,
-                Locked: env is not null,
+                Source: SourceOf(env, saved) switch
+                {
+                    SettingSource.Saved => "saved",
+                    SettingSource.Environment => "environment",
+                    _ => "default",
+                },
                 EnvVar: env is not null ? SettingsRegistry.EnvVarName(d.Key) : null,
                 Value: d.IsSecret ? null : resolved,
                 HasValue: !string.IsNullOrEmpty(resolved),
@@ -162,7 +182,7 @@ public sealed class SettingsService
             foreach (var entry in await ListAsync(kind, ct))
             {
                 var fields = kind.Fields.Select(f => Dto(SettingsRegistry.Find(Setups.FieldKey(f, entry.Id))!)).ToList();
-                setups.Add(new SetupDto(entry.Id, entry.Name, entry.Enabled, fields.Any(f => f.Locked), fields));
+                setups.Add(new SetupDto(entry.Id, entry.Name, entry.Enabled, fields));
             }
             // What a setup added on the screen starts from, before it is saved:
             // the fields with the defaults a new setup gets, and nothing else.
@@ -170,7 +190,7 @@ public sealed class SettingsService
                 .Select(f => SettingsRegistry.Find(f)!)
                 .Select(d => Dto(d) with
                 {
-                    Locked = false,
+                    Source = "default",
                     EnvVar = null,
                     Value = d.IsSecret || d.MainOnlyDefault ? null : d.Default,
                     HasValue = false,
@@ -179,19 +199,33 @@ public sealed class SettingsService
                 .ToList();
             groups.Add(new SettingsGroupDto(name, label, items, kind.ListKey, setups, template));
         }
+
+        // The AI switch has a consequence outside its group: on, what
+        // members type leaves the server, and the privacy policy under
+        // Legal should say so. The gap is read here, from the two values
+        // as they are in force, and shown on the group whose switch
+        // caused it rather than on the policy nobody reopens.
+        if (AiNotice(key => SettingsRegistry.Find(key) is { } d ? Resolve(d, EnvOf(key), stored.GetValueOrDefault(key)) : null) is { } gap
+            && groups.FindIndex(g => g.Name == "ai") is var ai and >= 0)
+            groups[ai] = groups[ai] with { Notice = gap };
         return groups;
     }
 
+    /// <summary>The AI group's notice from the values in force: the switch, read as the screen reads it, and the policy.</summary>
+    public static string? AiNotice(Func<string, string?> resolved) =>
+        Privacy.AiGap(
+            string.Equals(resolved("ai.enabled")?.Trim(), "true", StringComparison.OrdinalIgnoreCase),
+            resolved(Privacy.MarkdownKey));
+
     /// <summary>
     /// Validate, encrypt secrets, upsert, audit, invalidate. Null (or empty)
-    /// clears a value. Env-locked keys either throw or, for the setup path,
-    /// are skipped with a log line.
+    /// clears a value, and the environment variable or the default fills in.
+    /// Every key can be saved: what is saved wins over the environment.
     /// </summary>
     public async Task SetManyAsync(
         IReadOnlyDictionary<string, string?> updates,
         string changedBy,
         bool allowSystem = false,
-        bool skipLocked = false,
         CancellationToken ct = default)
     {
         var accepted = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -201,17 +235,6 @@ public sealed class SettingsService
                 ?? throw new SettingsValidationException($"Unknown setting '{key}'.");
             if (def.Group == SettingsRegistry.SystemGroup && !allowSystem)
                 throw new SettingsValidationException($"'{key}' is not editable.");
-            if (Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(key)) is not null)
-            {
-                if (skipLocked)
-                {
-                    _log.LogInformation("Skipping '{Key}': locked by {Env}.",
-                        key, SettingsRegistry.EnvVarName(key));
-                    continue;
-                }
-                throw new SettingsValidationException(
-                    $"'{key}' is locked by environment variable {SettingsRegistry.EnvVarName(key)}.");
-            }
             var given = Entered(def, value);
             if (ValueProblem(def, given) is { } refused)
                 throw new SettingsValidationException(refused);
@@ -331,10 +354,13 @@ public sealed class SettingsService
         // next restart, by a process that then runs without Redis.
         // A build host address that is not one, or a timeout that is not a
         // number of minutes, would leave every claim queued for nothing.
+        // An AI timeout or cap that is not a number would quietly become its
+        // default while the screen showed something else.
         return WebOrigin.Problem(def.Key, value)
             ?? Auth.JwtSettings.Problem(def.Key, value)
             ?? RedisSettings.Problem(def.Key, value)
-            ?? Preview.PreviewHost.Problem(def.Key, value);
+            ?? Preview.PreviewHost.Problem(def.Key, value)
+            ?? Ai.AiLimits.Problem(def.Key, value);
     }
 
     /// <summary>
@@ -369,10 +395,6 @@ public sealed class SettingsService
                 foreach (var field in kind.Fields)
                 {
                     var key = Setups.FieldKey(field, gone.Id);
-                    if (IsLocked(key))
-                        throw new SettingsValidationException(
-                            $"“{gone.Name}” cannot be removed: environment variable {SettingsRegistry.EnvVarName(key)} sets one of its values. "
-                            + "Remove it from the deployment first, or switch the setup off.");
                     if (stored.GetValueOrDefault(key) is not null) accepted[key] = null;
                 }
             }
@@ -432,13 +454,18 @@ public sealed class SettingsService
 
 public sealed class SettingsValidationException(string message) : Exception(message);
 
+/// <summary>Where a setting's value comes from: what is saved wins, then the deployment's environment variable, then the default.</summary>
+public enum SettingSource { Saved, Environment, Default }
+
+/// <param name="Source">saved, environment or default: where the value in force comes from.</param>
+/// <param name="EnvVar">The deployment's variable for this key when it sets one — in force only while nothing is saved.</param>
 public sealed record SettingDto(
     string Key,
     string Label,
     bool IsSecret,
     bool IsBoolean,
     bool IsMultiline,
-    bool Locked,
+    string Source,
     string? EnvVar,
     string? Value,
     bool HasValue,
@@ -446,14 +473,12 @@ public sealed record SettingDto(
     string? HelpTopic,
     IReadOnlyList<SettingChoice>? Choices = null);
 
-/// <param name="Locked">An environment variable sets one of its values, so the deployment — not the screen — can remove it.</param>
 /// <param name="InUse">What still lives in it, in words ("12 files"), when that stops it being removed.</param>
 /// <param name="LastTest">The last test run on it, which the badge on its card reads; null when it has never been tested.</param>
 public sealed record SetupDto(
     string Id,
     string Name,
     bool Enabled,
-    bool Locked,
     List<SettingDto> Settings,
     string? InUse = null,
     SetupTestDto? LastTest = null);
@@ -467,4 +492,6 @@ public sealed record SettingsGroupDto(
     List<SettingDto> Settings,
     string? ListKey = null,
     List<SetupDto>? Setups = null,
-    List<SettingDto>? Template = null);
+    List<SettingDto>? Template = null,
+    /// <summary>A warning the group's state earns, shown above its fields: today, the AI switch on with a privacy policy that does not say so.</summary>
+    string? Notice = null);

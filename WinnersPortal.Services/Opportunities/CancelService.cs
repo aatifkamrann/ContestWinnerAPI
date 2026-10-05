@@ -24,15 +24,28 @@ public static class CancelRules
     /// and an awarded opportunity is a promise already made — the award row is
     /// the record now, and cancelling cannot unwrite it.
     /// </summary>
-    public static bool CanCancel(OpportunityStatus status) =>
-        status is OpportunityStatus.Open or OpportunityStatus.Reviewing;
+    /// <remarks>
+    /// Paid by milestone, a hired job may be called off too — a freelancer
+    /// who stopped answering must not hold it forever — but never with a
+    /// milestone handed in and waiting on the client
+    /// (<see cref="MilestonePay.CancelProblem"/>). What was paid stays paid.
+    /// </remarks>
+    public static bool CanCancel(OpportunityStatus status, OpportunityKind kind = OpportunityKind.Competitive) =>
+        status is OpportunityStatus.Open or OpportunityStatus.Reviewing
+        || (MilestonePay.ByMilestone(kind) && status == OpportunityStatus.Awarded);
 
     /// <summary>Null when the cancellation is acceptable, else the message the form shows.</summary>
-    public static string? Problem(OpportunityStatus status, string? reason) =>
+    /// <param name="states">Paid by milestone and hired: where each milestone stands.</param>
+    public static string? Problem(
+        OpportunityStatus status, string? reason,
+        OpportunityKind kind = OpportunityKind.Competitive, IReadOnlyList<MilestonePayState>? states = null) =>
         status switch
         {
             OpportunityStatus.Draft => "A draft is not public — nothing was promised, so there is nothing to call off.",
-            OpportunityStatus.Awarded => "This opportunity has a winner. The award is the record now; cancelling cannot unwrite it.",
+            OpportunityStatus.Awarded when MilestonePay.ByMilestone(kind)
+                && MilestonePay.CancelProblem(states ?? []) is { } waiting => waiting,
+            OpportunityStatus.Awarded when !MilestonePay.ByMilestone(kind) =>
+                "This opportunity has a winner. The award is the record now; cancelling cannot unwrite it.",
             OpportunityStatus.Cancelled => "This opportunity is already cancelled.",
             _ => CleanReason(reason) is not { } r
                 ? $"Say why, in at least {MinReason} characters — the reason goes to every entrant who staked work on this brief."
@@ -61,8 +74,15 @@ public sealed class CancelService(AppDbContext db, GitHubWorkSignal githubSignal
             .SingleOrDefaultAsync(c => c.Id == id, ct);
         if (opportunity is null || opportunity.ClientId != clientId) return Outcome.NotFound();
 
-        if (CancelRules.Problem(opportunity.Status, request.Reason) is { } problem)
-            return CancelRules.CanCancel(opportunity.Status)
+        // Paid by milestone and hired: where the milestones stand decides.
+        var hired = MilestonePay.ByMilestone(opportunity.Kind) && opportunity.Status == OpportunityStatus.Awarded
+            ? await db.Awards.Where(a => a.OpportunityId == opportunity.Id).Select(a => (Guid?)a.EntryId).SingleOrDefaultAsync(ct)
+            : null;
+        var states = hired is { } entryId
+            ? (await MilestonePaymentService.ReadAsync(db, opportunity.Id, entryId, ct)).States
+            : null;
+        if (CancelRules.Problem(opportunity.Status, request.Reason, opportunity.Kind, states) is { } problem)
+            return CancelRules.CanCancel(opportunity.Status, opportunity.Kind) && CancelRules.CleanReason(request.Reason) is null
                 ? Outcome.Invalid(problem)
                 : Outcome.Conflict(problem);
 

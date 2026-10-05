@@ -48,8 +48,32 @@ public sealed class AiArtifact
 
     public string? Model { get; set; }
 
-    /// <summary>Provider attempts on the current request; drives give-up, not backoff.</summary>
+    /// <summary>
+    /// The version of the prompt the current output answers (the feature's
+    /// number in AiPrompts.Version when it was drafted). Null for the local
+    /// spam scan, and for drafts made before prompts carried a version.
+    /// </summary>
+    public int? PromptVersion { get; set; }
+
+    /// <summary>
+    /// What the current output cost in tokens, as the provider counted
+    /// them: sent and answered. Null for the local spam scan, for a draft
+    /// made before calls carried their count, and when the provider sent
+    /// none. Untouched by a free hash-match re-run, like the output.
+    /// </summary>
+    public int? InputTokens { get; set; }
+
+    public int? OutputTokens { get; set; }
+
+    /// <summary>Provider attempts on the current request; three is the give-up.</summary>
     public int Attempts { get; set; }
+
+    /// <summary>
+    /// Not before this moment, after a failure worth trying again: a minute
+    /// after the first, five after the second, so a provider's bad minute
+    /// is waited out rather than spent on. Null means the next sweep.
+    /// </summary>
+    public DateTimeOffset? NextAttemptAtUtc { get; set; }
 
     public DateTimeOffset CreatedAtUtc { get; set; }
 

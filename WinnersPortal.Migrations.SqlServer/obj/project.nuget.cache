@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "AKcrAncH5ck=",
+  "dgSpecHash": "4NR2L5N6fVE=",
   "success": true,
-  "projectFilePath": "D:\\Projects\\Astrik\\FreelanceContest\\ContestWinnerAPI\\WinnersPortal.Migrations.SqlServer\\WinnersPortal.Migrations.SqlServer.csproj",
+  "projectFilePath": "D:\\Projects\\Astrik\\WinnersPortal\\src\\WinnersPortal.Migrations.SqlServer\\WinnersPortal.Migrations.SqlServer.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\techmenders\\.nuget\\packages\\azure.core\\1.47.1\\azure.core.1.47.1.nupkg.sha512",
     "C:\\Users\\techmenders\\.nuget\\packages\\azure.identity\\1.14.2\\azure.identity.1.14.2.nupkg.sha512",

@@ -118,20 +118,21 @@ public static partial class ProfileReview
             Lever("title", "Add a professional title", portfolio with { HasHeadline = true });
         if (!portfolio.HasBio)
             Lever("about", "Write an About You", portfolio with { HasBio = true });
-        if (portfolio.Skills < 6)
-            Lever("skills", $"List {Count(6 - portfolio.Skills, "more skill")}", portfolio with { Skills = 6 });
-        if (portfolio.Projects < 3)
+        if (portfolio.Skills < Merit.SkillsCounted)
+            Lever("skills", $"List {Count(Merit.SkillsCounted - portfolio.Skills, "more skill")}",
+                portfolio with { Skills = Merit.SkillsCounted });
+        if (portfolio.Projects < Merit.ProjectsCounted)
             Lever("projects",
                 portfolio.Projects == 0
-                    ? "Add three portfolio projects"
-                    : $"Add {Count(3 - portfolio.Projects, "more portfolio project")}",
-                portfolio with { Projects = 3 });
-        var linkable = Math.Min(2, portfolio.Projects);
+                    ? $"Add {Count(Merit.ProjectsCounted, "portfolio project")}"
+                    : $"Add {Count(Merit.ProjectsCounted - portfolio.Projects, "more portfolio project")}",
+                portfolio with { Projects = Merit.ProjectsCounted });
+        var linkable = Math.Min(Merit.LinksCounted, portfolio.Projects);
         if (portfolio.ProjectsWithLinks < linkable)
             Lever("links",
                 linkable - portfolio.ProjectsWithLinks == 1
                     ? "Add a link or repository to one of your projects"
-                    : "Add a link or repository to two of your projects",
+                    : $"Add a link or repository to {linkable - portfolio.ProjectsWithLinks} of your projects",
                 portfolio with { ProjectsWithLinks = linkable });
         if (!portfolio.HasDetails)
             Lever("details", "Fill in your location, hours a week and years of experience",

@@ -20,7 +20,7 @@ namespace WinnersPortal.Services.Preview;
 /// preview that does not exist. A milestone's preview is keyed by its
 /// checkpoint, the final's by its entry; either id opens the preview.
 /// </summary>
-public sealed class PreviewService(AppDbContext db, PreviewHostClient host, SettingsService settings, PreviewWorkSignal signal)
+public sealed class PreviewService(AppDbContext db, BuildHostService buildHost, SettingsService settings, PreviewWorkSignal signal)
 {
     // --------------------------------------------------------------- read
 
@@ -28,9 +28,9 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
     {
         var subject = await SubjectAsync(id, principal, ct);
         if (subject.Refusal is { } refusal) return refusal;
-        var config = await host.ActiveConfigAsync(ct);
+        var host = await buildHost.StateAsync(ct);
         var row = await db.Previews.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct);
-        return Outcome.Ok(await ResponseAsync(subject.Of!, row, config, ct));
+        return Outcome.Ok(await ResponseAsync(subject.Of!, row, host, ct));
     }
 
     // -------------------------------------------------------------- start
@@ -40,19 +40,20 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
         var subject = await SubjectAsync(id, principal, ct);
         if (subject.Refusal is { } refusal) return refusal;
         var s = subject.Of!;
-        var config = await host.ActiveConfigAsync(ct);
+        var host = await buildHost.StateAsync(ct);
         var now = DateTimeOffset.UtcNow;
 
         var row = await db.Previews.SingleOrDefaultAsync(p => p.Id == id, ct);
         if (row is { StopRequested: true })
             return Outcome.Conflict("This preview is stopping — start it again in a moment.");
         if (row is { Status: PreviewStatus.Pending or PreviewStatus.Starting or PreviewStatus.Running })
-            return Outcome.Ok(await ResponseAsync(s, row, config, ct)); // already on its way: one press is enough
+            return Outcome.Ok(await ResponseAsync(s, row, host, ct)); // already on its way: one press is enough
 
-        if (await StartProblemAsync(s, config, ct) is { } problem) return Outcome.Conflict(problem);
+        if (await StartProblemAsync(s, host, ct) is { } problem) return Outcome.Conflict(problem);
+        var config = host.Config!; // StartProblemAsync refused a start without one
         var busy = await db.Previews.CountAsync(p => !p.StopRequested && p.Id != id
             && (p.Status == PreviewStatus.Pending || p.Status == PreviewStatus.Starting || p.Status == PreviewStatus.Running), ct);
-        if (busy >= config!.MaxRunning) return Outcome.Conflict(Previews.MaxRunningText(config.MaxRunning));
+        if (busy >= config.MaxRunning) return Outcome.Conflict(Previews.MaxRunningText(config.MaxRunning));
 
         if (row is null)
         {
@@ -84,7 +85,7 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
             return Outcome.Conflict("This preview is already being started.");
         }
         signal.Wake();
-        return Outcome.Ok(await ResponseAsync(s, row, config, ct));
+        return Outcome.Ok(await ResponseAsync(s, row, host, ct));
     }
 
     // --------------------------------------------------------------- stop
@@ -94,8 +95,9 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
         var subject = await SubjectAsync(id, principal, ct);
         if (subject.Refusal is { } refusal) return refusal;
         var row = await db.Previews.SingleOrDefaultAsync(p => p.Id == id, ct);
-        var config = await host.ActiveConfigAsync(ct);
-        if (row is null) return Outcome.Ok(await ResponseAsync(subject.Of!, null, config, ct));
+        var host = await buildHost.StateAsync(ct);
+        var config = host.Config;
+        if (row is null) return Outcome.Ok(await ResponseAsync(subject.Of!, null, host, ct));
 
         if (row.Status == PreviewStatus.Pending)
         {
@@ -112,7 +114,7 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
             await db.SaveChangesAsync(ct);
             signal.Wake();
         }
-        return Outcome.Ok(await ResponseAsync(subject.Of!, row, config, ct));
+        return Outcome.Ok(await ResponseAsync(subject.Of!, row, host, ct));
     }
 
     // --------------------------------------------------------------- open
@@ -129,7 +131,7 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
         var row = await db.Previews.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct);
         if (row is not { Status: PreviewStatus.Running, StopRequested: false }) return Outcome.Conflict(Previews.NotRunning);
 
-        var config = await host.ActiveConfigAsync(ct);
+        var config = (await buildHost.StateAsync(ct)).Config;
         if (config?.RunUrl is not { } runUrl) return Outcome.Conflict(Previews.NoAddress);
         if (PreviewHost.RunDomainProblem(runUrl, PreviewHost.ParseWebUrl(await settings.GetAsync(WebOrigin.WebUrlKey, ct))) is { } domain)
             return Outcome.Conflict(domain);
@@ -184,9 +186,10 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
     }
 
     /// <summary>Why a start would be refused now, or null — the same sentence the panel shows beside a disabled button.</summary>
-    private async Task<string?> StartProblemAsync(Subject s, PreviewHostConfig? config, CancellationToken ct)
+    private async Task<string?> StartProblemAsync(Subject s, BuildHostState host, CancellationToken ct)
     {
-        if (config?.RunUrl is not { } runUrl) return Previews.NoAddress;
+        if (!host.Ready) return Previews.PreviewsOff;
+        if (host.Config?.RunUrl is not { } runUrl) return Previews.NoAddress;
         if (PreviewHost.RunDomainProblem(runUrl, PreviewHost.ParseWebUrl(await settings.GetAsync(WebOrigin.WebUrlKey, ct))) is { } domain)
             return domain;
         if (s.CheckpointId is not null)
@@ -194,11 +197,12 @@ public sealed class PreviewService(AppDbContext db, PreviewHostClient host, Sett
         return Previews.FinalProblem(s.OpportunityStatus, s.RequiresCompose, s.Frozen, s.EntryStatus);
     }
 
-    private async Task<PreviewResponse> ResponseAsync(Subject s, Domain.Preview? row, PreviewHostConfig? config, CancellationToken ct)
+    private async Task<PreviewResponse> ResponseAsync(Subject s, Domain.Preview? row, BuildHostState host, CancellationToken ct)
     {
+        var config = host.Config;
         var status = row?.Status ?? PreviewStatus.None;
         var live = status is PreviewStatus.Pending or PreviewStatus.Starting or PreviewStatus.Running;
-        var problem = live ? null : await StartProblemAsync(s, config, ct);
+        var problem = live ? null : await StartProblemAsync(s, host, ct);
         var commit = row?.Sha ?? (s.CheckpointId is not null ? s.Ref : null);
         return new PreviewResponse
         {

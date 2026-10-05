@@ -38,6 +38,27 @@ public sealed class IdentityOptions(SettingsService settings)
     public async Task<IdentityProviderConfig?> ProviderConfigAsync(string setupId, CancellationToken ct = default) =>
         await settings.SetupAsync(Setups.Identity, setupId, ct) is { } setup ? Config(setup) : null;
 
+    /// <summary>
+    /// A connection that can read a session opened with <paramref name="provider"/>:
+    /// the active setup when it is that provider, else the first other setup
+    /// that is and has a key. New sessions go through the active provider
+    /// only; one opened before the switch is still read — its verdict, its
+    /// proof — through a setup of its own provider, the way its webhooks
+    /// are still accepted.
+    /// </summary>
+    public async Task<IdentityProviderConfig?> ReaderForAsync(string provider, CancellationToken ct = default)
+    {
+        if (await ProviderConfigAsync(ct) is { } active && active.Provider == provider) return active;
+        foreach (var setup in await settings.SetupsAsync(Setups.Identity, ct))
+            if (Config(setup) is { } config && config.Provider == provider)
+                return config;
+        return null;
+    }
+
+    /// <summary>Every setup with a key, active or not — the webhook tries each one's secret.</summary>
+    public async Task<IReadOnlyList<IdentityProviderConfig>> AllConfigsAsync(CancellationToken ct = default) =>
+        [.. (await settings.SetupsAsync(Setups.Identity, ct)).Select(Config).OfType<IdentityProviderConfig>()];
+
     /// <summary>Pure: a setup's fields to a connection, or null when it has no key.</summary>
     public static IdentityProviderConfig? Config(SetupValues s)
     {
@@ -46,12 +67,27 @@ public sealed class IdentityOptions(SettingsService settings)
         var provider = s.Get(IdentityKeys.Provider)?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(provider)) provider = IdentityProviders.Didit;
         return new IdentityProviderConfig(
-            provider, apiKey, s.Get(IdentityKeys.WorkflowId)?.Trim() ?? "", s.Get(IdentityKeys.WebhookSecret), s.Name);
+            provider, apiKey, s.Get(IdentityKeys.WorkflowId)?.Trim() ?? "", s.Get(IdentityKeys.WebhookSecret), s.Name,
+            s.Get(IdentityKeys.ClientId)?.Trim() ?? "");
     }
+
+    /// <summary>
+    /// Pure: whether a connection has what opening a session needs beyond the
+    /// key — Didit's workflow, Shufti Pro's client ID. Null when it has.
+    /// </summary>
+    public static string? MissingForStart(IdentityProviderConfig config) => config.Provider switch
+    {
+        IdentityProviders.Didit when config.WorkflowId.Length == 0 => "workflow ID",
+        IdentityProviders.ShuftiPro when config.ClientId.Length == 0 => "client ID",
+        _ => null,
+    };
 
     private async Task<bool> BoolAsync(string key, CancellationToken ct) =>
         string.Equals(await settings.GetAsync(key, ct), "true", StringComparison.OrdinalIgnoreCase);
 }
 
+/// <param name="ApiKey">Didit's API key, or Shufti Pro's secret key.</param>
+/// <param name="ClientId">Shufti Pro's client ID; blank for Didit.</param>
 public sealed record IdentityProviderConfig(
-    string Provider, string ApiKey, string WorkflowId, string? WebhookSecret, string Setup = Setups.MainName);
+    string Provider, string ApiKey, string WorkflowId, string? WebhookSecret, string Setup = Setups.MainName,
+    string ClientId = "");

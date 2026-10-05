@@ -16,7 +16,7 @@ using WinnersPortal.Services.Storage;
 
 namespace WinnersPortal.Services.Opportunities;
 
-public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSignal aiSignal, SettingsService settings, GitHubService github, StorageService storage, ActivityNote activity, EmailWorkSignal emailSignal, PushWorkSignal pushSignal, UnsubscribeTokens unsubscribe, IdentityOptions identity, PublicReads publicReads)
+public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSignal aiSignal, SettingsService settings, GitHubService github, StorageService storage, ActivityNote activity, EmailWorkSignal emailSignal, PushWorkSignal pushSignal, UnsubscribeTokens unsubscribe, IdentityOptions identity, PublicReads publicReads, Preview.BuildHostService buildHost)
 {
     /// <summary>One page of the feed as the database gave it, before any caller's side of it is added.</summary>
     private sealed record FeedPage(List<OpportunityCards.Row> Rows, bool HasMore);
@@ -238,11 +238,17 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             })
             .ToListAsync(ct);
 
+        // Builds, previews and the Builds line of a standing, where the
+        // opportunity asks for them and the build host is on and tested: an
+        // opportunity published under a host that has since gone quiet shows
+        // none of them until it passes a test again. Asked only where it matters.
+        var buildsOn = c.RequiresCompose && await buildHost.ReadyAsync(ct);
+
         // The previews up or on their way, where the opportunity runs them: one
         // read for the page, keyed by the preview's id (a checkpoint's for a
         // milestone, an entry's for the final).
         var entryIds = entrantRows.Select(e => e.Id).ToList();
-        var previewStates = c.RequiresCompose && entryIds.Count > 0
+        var previewStates = buildsOn && entryIds.Count > 0
             ? await db.Previews.AsNoTracking()
                 .Where(p => entryIds.Contains(p.EntryId) && !p.StopRequested
                     && (p.Status == PreviewStatus.Pending || p.Status == PreviewStatus.Starting || p.Status == PreviewStatus.Running))
@@ -254,7 +260,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         // null before the freeze, after a cancellation, or where the opportunity
         // runs nothing — the same rule the start is judged by.
         string? FinalOf(Guid entryId, DateTimeOffset? frozenAt) =>
-            Preview.Previews.FinalProblem(c.Status, c.RequiresCompose, frozenAt != null, EntryStatus.Active) is null
+            buildsOn && Preview.Previews.FinalProblem(c.Status, c.RequiresCompose, frozenAt != null, EntryStatus.Active) is null
                 ? PreviewOf(entryId) ?? "none"
                 : null;
 
@@ -297,7 +303,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         // Every entrant's standing on this opportunity — the number the board
         // is ordered by and the reading beside the remove button. One
         // batched read; the arithmetic is Standing's, line by line.
-        var standings = await StandingReader.ForOpportunitiesAsync(db, [c.Id], now, ct);
+        var standings = await StandingReader.ForOpportunitiesAsync(db, [c.Id], now, buildsOn, ct);
         var entrants = entrantRows
             .Select(e =>
             {
@@ -386,7 +392,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                     RepoFullName = isOwner ? e.RepoFullName : null,
                     // The build of each claim, one cell per milestone — only
                     // where the opportunity asks for builds at all.
-                    Builds = showBoard && c.RequiresCompose
+                    Builds = showBoard && buildsOn
                         ? ordered.Select(m =>
                         {
                             var cp = e.Claimed.FirstOrDefault(x => x.Order == m.Order);
@@ -426,20 +432,53 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         var ratingOfWinner = awardRatings.FirstOrDefault(r => r.OfUserId != c.ClientId);
         var viewerIsWinner = viewerId is not null && viewerId == awardRow?.WinnerUserId;
 
+        // Paid by milestone: the hired freelancer's claims are the
+        // milestones handed in, and each carries its review and payment.
+        var byMilestone = MilestonePay.ByMilestone(c.Kind);
+        var payRows = byMilestone && awardRow is not null
+            ? await db.Checkpoints.AsNoTracking()
+                .Where(cp => cp.EntryId == awardRow.EntryId)
+                .Select(cp => new
+                {
+                    cp.Id, cp.MilestoneId, cp.Ref, cp.ClaimedAtUtc,
+                    cp.ChangesRequestedAtUtc, cp.ChangesNote, cp.ApprovedAtUtc, cp.PaidAtUtc,
+                })
+                .ToListAsync(ct)
+            : [];
+        var paySteps = ordered
+            .Select(m => payRows.FirstOrDefault(p => p.MilestoneId == m.Id))
+            .ToList();
+        var payStates = MilestonePay.States(paySteps
+            .Select(p => new MilestonePay.Step(p is not null, p?.ChangesRequestedAtUtc, p?.ApprovedAtUtc, p?.PaidAtUtc))
+            .ToList());
+        var payMoney = MilestonePay.Money(payStates, ordered.Select(m => m.Amount).ToList());
+        var seesPayment = isOwner || isAdmin || viewerIsWinner;
+
         // The client's public payment record — the counterweight to "no
         // deposit, open entry". Entrants stake real work on this client's
         // promise; here is how their past promises went.
-        var clientAwardRows = await db.Awards.AsNoTracking()
-            .Where(a => a.Opportunity!.ClientId == c.ClientId)
-            .Select(a => new { a.AnnouncedAtUtc, a.PaidAtUtc })
-            .ToListAsync(ct);
+        // A payment is owed from the moment it was promised: a competitive
+        // award from its announcement, a milestone from its approval — a
+        // job paid by milestone is judged payment by payment, not as one
+        // award that stays "unpaid" until its last milestone.
+        var clientAwardRows = (await db.Awards.AsNoTracking()
+                .Where(a => a.Opportunity!.ClientId == c.ClientId && a.Opportunity.Kind == OpportunityKind.Competitive)
+                .Select(a => new { OwedFrom = a.AnnouncedAtUtc, a.PaidAtUtc })
+                .ToListAsync(ct))
+            .Concat(await db.Checkpoints.AsNoTracking()
+                .Where(cp => cp.ApprovedAtUtc != null
+                    && cp.Entry!.Opportunity!.ClientId == c.ClientId
+                    && cp.Entry.Opportunity.Kind == OpportunityKind.Milestones)
+                .Select(cp => new { OwedFrom = cp.ApprovedAtUtc!.Value, cp.PaidAtUtc })
+                .ToListAsync(ct))
+            .ToList();
         var daysToPay = clientAwardRows
             .Where(a => a.PaidAtUtc != null)
-            .Select(a => TrackRecordMath.DaysToPay(a.AnnouncedAtUtc, a.PaidAtUtc!.Value))
+            .Select(a => TrackRecordMath.DaysToPay(a.OwedFrom, a.PaidAtUtc!.Value))
             .ToList();
         var oldestUnpaid = clientAwardRows
             .Where(a => a.PaidAtUtc == null)
-            .Select(a => (DateTimeOffset.UtcNow - a.AnnouncedAtUtc).TotalDays)
+            .Select(a => (DateTimeOffset.UtcNow - a.OwedFrom).TotalDays)
             .OrderDescending()
             .Cast<double?>()
             .FirstOrDefault();
@@ -530,7 +569,8 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         var applicationCount = await db.Applications.CountAsync(a => a.OpportunityId == c.Id, ct);
         var applications = canModerate
             ? await ApplicationService.ReviewRowsAsync(
-                db, c.Id, c.Category, c.Status, Schedule.StartsAt(c.StartsAtUtc, c.PublishedAtUtc), now, ct)
+                db, c.Id, c.Category, c.Status, Schedule.StartsAt(c.StartsAtUtc, c.PublishedAtUtc), now,
+                await ai.PublicNameAsync(ct), ct)
             : null;
         StandingReader.Row? viewerStanding = null;
         if (viewerEntryRow is not null) standings.TryGetValue(viewerEntryRow.Id, out viewerStanding);
@@ -547,6 +587,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             // Repository, upload, or both — every role-specific panel on
             // the page branches on this before it says the word "repo".
             Delivery = Delivery.Name(c.Delivery),
+            Kind = MilestonePay.KindName(c.Kind),
             RequiresCompose = c.RequiresCompose,
             DeadlineUtc = c.DeadlineUtc,
             // The last joining date, already resolved: null on the row
@@ -591,6 +632,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             Milestones = ordered.Select(m => new OpportunityMilestoneView
             {
                 Title = m.Title, Description = m.Description, DueUtc = m.DueUtc, WeightPercent = m.WeightPercent,
+                Amount = m.Amount,
             }),
             Attachments = attachments,
             // The terms beside the brief: what the work must be built
@@ -656,7 +698,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                 Files = viewerEntryRow.Files.Select(f => SubmissionService.Summary(
                     f.Id, f.FileName, f.ContentType, f.SizeBytes, f.UploadedAtUtc, f.MilestoneOrder + 1)),
                 UploadProblem = Delivery.UsesUpload(c.Delivery)
-                    ? Delivery.UploadProblem(c.Status, c.DeadlineUtc, now)
+                    ? Delivery.UploadProblem(c.Status, c.DeadlineUtc, now, c.Kind, MilestonePay.Complete(payStates))
                     : "This opportunity is delivered through GitHub.",
                 // Their own standing, with the arithmetic and the one
                 // step that would move it most — the entrant's side of
@@ -719,6 +761,21 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                 HandoverVerifiedAtUtc = isOwner ? awardRow.HandoverVerifiedAtUtc : null,
                 HandoverNote = isOwner ? awardRow.HandoverNote : null,
                 WinnerRepoFullName = isOwner ? awardRow.WinnerRepo : null,
+                Payments = !byMilestone ? null : ordered.Select((m, i) => new MilestonePaymentView
+                {
+                    Number = i + 1,
+                    State = MilestonePay.StateName(payStates[i]),
+                    Amount = m.Amount,
+                    SubmittedAtUtc = paySteps[i]?.ClaimedAtUtc,
+                    ApprovedAtUtc = paySteps[i]?.ApprovedAtUtc,
+                    PaidAtUtc = paySteps[i]?.PaidAtUtc,
+                    CheckpointId = seesPayment ? paySteps[i]?.Id : null,
+                    Ref = seesPayment ? paySteps[i]?.Ref : null,
+                    ChangesNote = seesPayment ? paySteps[i]?.ChangesNote : null,
+                    ChangesRequestedAtUtc = seesPayment ? paySteps[i]?.ChangesRequestedAtUtc : null,
+                }).ToList(),
+                AmountPaid = byMilestone ? payMoney.Paid : null,
+                AmountOwed = byMilestone ? payMoney.Owed : null,
             },
         });
     }
@@ -727,7 +784,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
     public async Task<Outcome<OpportunitySavedResponse>> CreateAsync(OpportunityUpsertRequest request, bool publishing, ClaimsPrincipal principal, CancellationToken ct)
     {
         activity.Action = ActivityNames.OpportunitySaved(isNew: true, publishing);
-        var error = Validate(request);
+        var error = Validate(request) ?? await ComposeProblemAsync(request, ct);
         if (error is not null) return Outcome.Invalid(error);
 
         var opportunity = new Opportunity
@@ -756,7 +813,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         if (opportunity.Status != OpportunityStatus.Draft)
             return Outcome.Conflict("Only drafts can be edited. A published brief is what entrants committed their time to.");
 
-        var error = Validate(request);
+        var error = Validate(request) ?? await ComposeProblemAsync(request, ct);
         if (error is not null) return Outcome.Invalid(error);
         db.OpportunitySkills.RemoveRange(opportunity.Skills);
         opportunity.Skills.Clear();
@@ -813,10 +870,21 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             return Outcome.Invalid("Add at least one milestone; the checklist becomes every entrant's board.");
         if (OpportunityCategories.PublishProblem(opportunity.Category) is { } uncategorised)
             return Outcome.Invalid(uncategorised);
+        // The form drops the requirement while builds are off; a draft saved
+        // before the host went quiet is caught here rather than published
+        // with a term nothing can check.
+        if (opportunity.RequiresCompose && !await buildHost.ReadyAsync(ct))
+            return Outcome.Invalid(Preview.Previews.PublishWithoutBuilds);
 
         var minAward = decimal.TryParse(await settings.GetAsync("opportunity.minAwardUsd", ct), out var m) ? m : 0;
         if (opportunity.AwardAmount < minAward)
             return Outcome.Invalid($"The award must be at least {minAward:0} USD (opportunity policy).");
+        // Paid by milestone: every milestone pays its part, and the parts
+        // are the whole the card promises.
+        if (MilestonePay.ByMilestone(opportunity.Kind)
+            && MilestonePay.PublishProblem(opportunity.AwardAmount,
+                opportunity.Milestones.OrderBy(m => m.Order).Select(m => m.Amount).ToList()) is { } amounts)
+            return Outcome.Invalid(amounts);
 
         var now = DateTimeOffset.UtcNow;
         // A start day that went by while the draft sat is the day it is
@@ -866,6 +934,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
     {
         var title = r.Title?.Trim() ?? "";
         if (title.Length is < 4 or > 140) return "Title must be 4–140 characters.";
+        if (MilestonePay.ParseKind(r.Kind) is null) return "The kind is \"competitive\" or \"milestones\".";
         if (Delivery.Problem(r.Delivery) is { } delivery) return delivery;
         if (Delivery.ComposeProblem(r.Delivery, r.RequiresCompose) is { } compose) return compose;
         if (r.AwardAmount is < 0 or > 1_000_000_000) return "Award amount is out of range.";
@@ -873,6 +942,9 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         if (milestones.Count > 50) return "At most 50 milestones.";
         if (milestones.Any(m => string.IsNullOrWhiteSpace(m.Title)))
             return "Every milestone needs a title.";
+        for (var i = 0; i < milestones.Count; i++)
+            if (MilestonePay.DraftAmountProblem(milestones[i].Amount, i + 1) is { } amount)
+                return amount;
         if (r.MetaTitle?.Trim().Length > 80) return "The search title must stay under 80 characters.";
         if (r.MetaDescription?.Trim().Length > 200) return "The search description must stay under 200 characters.";
         if (OpportunityCategories.Problem(r.Category, r.Subcategory) is { } category) return category;
@@ -885,10 +957,20 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             Schedule.Day(r.StartsAtUtc), r.EntryCloseUtc, r.DeadlineUtc, milestones.Select(m => m.DueUtc));
     }
 
+    /// <summary>
+    /// The one check Validate cannot make on its own: Docker Compose is
+    /// offered only while builds are on, so a form cannot ask entrants for a
+    /// requirement nothing will check. Asked only when the tick is on.
+    /// </summary>
+    private async Task<string?> ComposeProblemAsync(OpportunityUpsertRequest r, CancellationToken ct) =>
+        r.RequiresCompose == true && !await buildHost.ReadyAsync(ct) ? Preview.Previews.ComposeUnavailable : null;
+
     private static void Apply(Opportunity opportunity, OpportunityUpsertRequest r)
     {
         opportunity.BriefMarkdown = r.BriefMarkdown ?? "";
-        opportunity.Delivery = Delivery.Parse(r.Delivery)!.Value; // Validate() ran first
+        opportunity.Kind = MilestonePay.ParseKind(r.Kind)!.Value; // Validate() ran first
+        var byMilestone = MilestonePay.ByMilestone(opportunity.Kind);
+        opportunity.Delivery = Delivery.Parse(r.Delivery)!.Value;
         opportunity.RequiresCompose = r.RequiresCompose == true;
         opportunity.AwardAmount = r.AwardAmount ?? 0;
         opportunity.StartsAtUtc = Schedule.Day(r.StartsAtUtc); // a day: 00:00 UTC on it
@@ -916,7 +998,10 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             Title = m.Title!.Trim(),
             Description = string.IsNullOrWhiteSpace(m.Description) ? null : m.Description.Trim(),
             DueUtc = m.DueUtc,
-            WeightPercent = m.WeightPercent,
+            // Paid by milestone, the amounts are the shares; a competitive
+            // opportunity pays one award and its milestones carry none.
+            WeightPercent = byMilestone ? null : m.WeightPercent,
+            Amount = byMilestone ? m.Amount : null,
         }));
         opportunity.Requirements.AddRange((Rubric.CleanRequirements(r.Requirements, out _) ?? []).Select((x, i) => new OpportunityRequirement
         {
@@ -970,7 +1055,12 @@ public sealed record OpportunityUpsertRequest(
     List<CriterionInput>? Criteria = null,
     // The competition start date — a day; any time sent is folded to 00:00
     // UTC. Blank or today starts it the moment it is published.
-    DateTimeOffset? StartsAtUtc = null);
+    DateTimeOffset? StartsAtUtc = null,
+    // "competitive" (blank) or "milestones": one hired freelancer, paid
+    // milestone by milestone. Frozen at publish.
+    string? Kind = null);
 
 public sealed record MilestoneInput(
-    string? Title, string? Description, DateTimeOffset? DueUtc = null, int? WeightPercent = null);
+    string? Title, string? Description, DateTimeOffset? DueUtc = null, int? WeightPercent = null,
+    // What the milestone pays, on an opportunity paid by milestone.
+    decimal? Amount = null);

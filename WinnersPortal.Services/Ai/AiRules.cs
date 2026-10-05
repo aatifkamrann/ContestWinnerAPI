@@ -18,7 +18,19 @@ public static class AiRules
     /// <summary>Provider retries before an artifact fails for the requester to see.</summary>
     public const int MaxAttempts = 3;
 
-    /// <summary>The cache key: same input, same hash, no provider call.</summary>
+    /// <summary>
+    /// The cache key: same input, same prompt, same hash, no provider call.
+    /// The prompt's version (<see cref="AiPrompts.Version"/>) is part of it,
+    /// so a reworded prompt is a changed input and its cached answers are
+    /// re-drafted rather than served. The spam scan has no prompt and
+    /// hashes its input alone.
+    /// </summary>
+    public static string InputHash(AiFeature feature, string canonicalInput) =>
+        AiOptions.RequiresProvider(feature)
+            ? InputHash($"prompt v{AiPrompts.Version(feature)}\n{canonicalInput}")
+            : InputHash(canonicalInput);
+
+    /// <summary>SHA-256 of the text, lower-case hex — the mechanics under the cache key.</summary>
     public static string InputHash(string canonicalInput)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonicalInput));
@@ -52,6 +64,54 @@ public static class AiRules
             "The AI provider could not be reached this time. Please try again in a few minutes.",
         _ => Clip(e.Message, 380),
     };
+
+    /// <summary>
+    /// Whether a failed job is worth trying again later: a provider's bad
+    /// minute (a 429, a 5xx, the pause after repeated failures), an
+    /// attempt that timed out or a connection that never answered, a
+    /// cut-off answer or an empty one may well pass next time. Nothing
+    /// else is — the provider declining the input is its reading of that
+    /// input, a 4xx was the request's own fault, and an answer off its
+    /// shape or a subject that is gone will be the same an hour from now;
+    /// those fail on the first attempt, so the remaining ones are not spent.
+    /// </summary>
+    public static bool Retryable(Exception e) => e switch
+    {
+        AiProviderException p => p.StatusCode is 429 or >= 500
+            || p.Failure is AiFailure.Truncated or AiFailure.Empty or AiFailure.Timeout or AiFailure.Paused,
+        HttpRequestException or TaskCanceledException or TimeoutException => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Whether the provider never ran the call, so the counted unit is given
+    /// back: a 429, a 5xx, or the portal's own pause. Not a timed-out
+    /// attempt — the provider may have run it and billed it.
+    /// </summary>
+    public static bool NothingRan(Exception e) =>
+        e is AiProviderException { StatusCode: 429 or >= 500 } or AiProviderException { Failure: AiFailure.Paused };
+
+    /// <summary>
+    /// Whether the provider could not be reached at all, so a standby
+    /// setup may be asked the same prompt: a 429, a 5xx, the portal's own
+    /// pause, a call no attempt answered in time, or a connection that
+    /// never answered. Not a refusal, a 4xx or an answer off its shape —
+    /// those are the active provider's reading of the request, and
+    /// another provider is not asked to overrule it.
+    /// </summary>
+    public static bool Unreached(Exception e) =>
+        e is HttpRequestException
+        || e is AiProviderException { StatusCode: 429 or >= 500 }
+        || e is AiProviderException { Failure: AiFailure.Paused or AiFailure.Timeout };
+
+    /// <summary>
+    /// How long a job waits before its next attempt: a minute after the
+    /// first failure, five after the second. The resilience pipeline has
+    /// already retried within the call; this is the wait between calls,
+    /// long enough for a provider's bad minute to pass.
+    /// </summary>
+    public static TimeSpan Backoff(int attempts) =>
+        attempts <= 1 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(5);
 
     /// <summary>Hard cap with an honest marker, so the model knows text is missing.</summary>
     public static string Clip(string? text, int maxChars)
@@ -120,12 +180,14 @@ public enum FormPart
     Delivery = 32,
     Milestones = 64,
     Criteria = 128,
+    /// <summary>How the opportunity pays: paid by milestone, with the total the milestones share. Absent on a competitive one.</summary>
+    Pay = 256,
 }
 
 public static class AiFormReads
 {
     public const FormPart Everything = FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Skills
-        | FormPart.Requirements | FormPart.Delivery | FormPart.Milestones | FormPart.Criteria;
+        | FormPart.Requirements | FormPart.Delivery | FormPart.Milestones | FormPart.Criteria | FormPart.Pay;
 
     /// <summary>What one form tool is handed; throws for a feature that does not read the form.</summary>
     public static FormPart Of(AiFeature feature) => feature switch
@@ -135,8 +197,10 @@ public static class AiFormReads
         AiFeature.BriefCoach => Everything,
         AiFeature.CategorySuggestion => FormPart.Title | FormPart.Brief,
         AiFeature.RequirementsSuggestion => FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Skills,
+        // The payment terms sit above the milestones on the form: paid by
+        // milestone, the draft splits the client's total across them.
         AiFeature.MilestoneExtraction => FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Skills
-            | FormPart.Requirements | FormPart.Delivery,
+            | FormPart.Requirements | FormPart.Delivery | FormPart.Pay,
         AiFeature.CriteriaSuggestion => FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Requirements
             | FormPart.Delivery | FormPart.Milestones,
         AiFeature.SeoMetadata => FormPart.Title | FormPart.Brief | FormPart.Kind,
@@ -146,38 +210,22 @@ public static class AiFormReads
 }
 
 /// <summary>
-/// The daily ceiling as arithmetic: a UTC date key and a counter, both kept
-/// in settings rows. Limit zero (or garbage) blocks every provider call —
-/// the paranoid reading is the safe one for a knob that spends money.
+/// The daily ceiling and the per-member caps as words and arithmetic: the
+/// UTC day a count belongs to, and what a person is told when a cap stops
+/// their press. The counts themselves are rows of AiUsage, taken by
+/// <see cref="AiQuota"/> in a single statement each.
 /// </summary>
 public static class AiQuotaRules
 {
     public static string DayKey(DateTimeOffset nowUtc) => nowUtc.UtcDateTime.ToString("yyyy-MM-dd");
 
-    /// <summary>One call's verdict: whether it may run, and the state to store if it does.</summary>
-    public static (bool Allowed, string NewDate, int NewCount) Consume(
-        string? storedDate, string? storedCount, DateTimeOffset nowUtc, int limit)
+    /// <summary>The line a member reads when a cap stopped the call before anything was sent.</summary>
+    public static string Refusal(AiQuotaVerdict verdict) => verdict switch
     {
-        var today = DayKey(nowUtc);
-        var count = string.Equals(storedDate, today, StringComparison.Ordinal)
-            && int.TryParse(storedCount, out var n) && n > 0 ? n : 0;
-        if (limit <= 0 || count >= limit) return (false, today, count);
-        return (true, today, count + 1);
-    }
-
-    /// <summary>
-    /// Give a counted call back, for one the provider never ran. Only
-    /// today’s count can be given back to: a call counted yesterday is
-    /// history, and a count that has already rolled over is not ours to
-    /// touch. Never below zero, whatever the stored value says.
-    /// </summary>
-    public static (string Date, int Count) Refund(
-        string? storedDate, string? storedCount, DateTimeOffset nowUtc)
-    {
-        var today = DayKey(nowUtc);
-        if (!string.Equals(storedDate, today, StringComparison.Ordinal)
-            || !int.TryParse(storedCount, out var count) || count <= 0)
-            return (today, 0);
-        return (today, count - 1);
-    }
+        AiQuotaVerdict.MemberBurst => "You have asked the AI assistant a few times in the last minute — give it a moment and press again.",
+        AiQuotaVerdict.MemberDay => "You have used today's AI drafts — the allowance starts again after midnight UTC.",
+        AiQuotaVerdict.Portal => "The daily AI call ceiling is reached — try again tomorrow.",
+        AiQuotaVerdict.Budget => "The daily AI spend budget is reached — try again tomorrow.",
+        _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, "An allowed call has no refusal."),
+    };
 }

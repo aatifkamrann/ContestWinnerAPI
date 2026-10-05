@@ -9,6 +9,9 @@ public sealed record AiDraftResponse
     public required JsonElement Output { get; init; }
     public required string Provider { get; init; }
     public required DateTimeOffset CompletedAtUtc { get; init; }
+
+    /// <summary>True when the answer was held from an earlier press on the same form within the hour, so no call was spent.</summary>
+    public required bool Cached { get; init; }
 }
 
 /// <summary>The profile review, or why it cannot run.</summary>

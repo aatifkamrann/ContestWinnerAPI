@@ -8,6 +8,9 @@ namespace WinnersPortal.Domain;
 /// </summary>
 public sealed class Checkpoint
 {
+    /// <summary>The longest request for changes a client may write.</summary>
+    public const int MaxChangesNote = 1000;
+
     public Guid Id { get; set; }
 
     public Guid EntryId { get; set; }
@@ -26,6 +29,24 @@ public sealed class Checkpoint
     public required string Ref { get; set; }
 
     public DateTimeOffset ClaimedAtUtc { get; set; }
+
+    // ---- review and payment, paid by milestone ---------------------------
+    // Only on an opportunity paid by milestone: the claim is the hired
+    // freelancer handing the milestone in, the client approves it (or asks
+    // for changes), pays it off-portal and marks it paid — and the next
+    // milestone opens only then. Null on a competitive opportunity.
+
+    /// <summary>When the client asked for changes; cleared when the freelancer hands the milestone in again.</summary>
+    public DateTimeOffset? ChangesRequestedAtUtc { get; set; }
+
+    /// <summary>What the client asked to change, in their words; kept after a resubmission as the last request.</summary>
+    public string? ChangesNote { get; set; }
+
+    /// <summary>When the client approved the milestone as done.</summary>
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+
+    /// <summary>When the client confirmed paying this milestone's amount. Opens the next milestone.</summary>
+    public DateTimeOffset? PaidAtUtc { get; set; }
 
     // ---- the build of the claimed commit --------------------------------
     // Only on an opportunity that requires Docker Compose, and only for a claim

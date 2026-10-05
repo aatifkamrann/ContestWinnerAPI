@@ -17,9 +17,10 @@ namespace WinnersPortal.Services.Settings;
 /// backplane while the container is being composed, so a saved change waits
 /// for the next restart of the API, and <see cref="RestartPending"/> says
 /// when one is owed. That is the JWT group's contract, for the same reason.
-/// Like every setting, each can be pinned from the environment
-/// (<c>WP_REDIS_ENABLED</c>, <c>WP_REDIS_URL</c>); the older
-/// <c>REDIS_URL</c>, which compose sets, is read as both pins.
+/// Like every setting, each can be given by the environment
+/// (<c>WP_REDIS_ENABLED</c>, <c>WP_REDIS_URL</c>), in force only while
+/// nothing is saved; the older <c>REDIS_URL</c>, which compose sets, is read
+/// as both variables.
 /// </remarks>
 public static class RedisSettings
 {
@@ -88,43 +89,47 @@ public static class RedisSettings
             : ("true", legacy.Trim());
 
     /// <summary>
-    /// The pair as the environment and the database hold it now, read
-    /// before the host exists on a context of its own. A database that
+    /// The pair as the database and the environment hold it now, read
+    /// before the host exists on a context of its own: what is saved wins,
+    /// and each variable fills in only where nothing is. A database that
     /// cannot be read yet — a fresh install with no tables, a server that
-    /// is not up — reads as the default, off, and says why: the migrations
-    /// a moment later report the real trouble properly.
+    /// is not up — leaves the variables, or the default, off, and says why:
+    /// the migrations a moment later report the real trouble properly.
     /// </summary>
     public static async Task<Choice> ReadAsync(DatabaseProvider provider, string connectionString, Action<string>? warn, CancellationToken ct)
     {
-        var enabledPin = Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(EnabledKey));
-        var urlPin = Environment.GetEnvironmentVariable(SettingsRegistry.EnvVarName(UrlKey));
+        var enabledEnv = SettingsService.EnvOf(EnabledKey);
+        var urlEnv = SettingsService.EnvOf(UrlKey);
         string? enabledRow = null, urlRow = null;
-        if (enabledPin is null || urlPin is null)
+        try
         {
-            try
-            {
-                await using var db = new AppDbContext(AppDbContextOptions.Build(provider, connectionString));
-                var rows = await db.Settings.AsNoTracking()
-                    .Where(s => s.Key == EnabledKey || s.Key == UrlKey)
-                    .ToListAsync(ct);
-                enabledRow = rows.FirstOrDefault(r => r.Key == EnabledKey)?.Value;
-                urlRow = rows.FirstOrDefault(r => r.Key == UrlKey)?.Value;
-            }
-            catch (Exception e) when (e is not OperationCanceledException)
-            {
-                warn?.Invoke($"The Redis settings could not be read before the start ({e.GetType().Name}); Redis is off for this process unless the environment says otherwise.");
-            }
+            await using var db = new AppDbContext(AppDbContextOptions.Build(provider, connectionString));
+            var rows = await db.Settings.AsNoTracking()
+                .Where(s => s.Key == EnabledKey || s.Key == UrlKey)
+                .ToListAsync(ct);
+            enabledRow = rows.FirstOrDefault(r => r.Key == EnabledKey)?.Value;
+            urlRow = rows.FirstOrDefault(r => r.Key == UrlKey)?.Value;
         }
-        var source = enabledPin is not null || urlPin is not null ? "environment"
-            : enabledRow is not null || urlRow is not null ? "setting"
-            : "default";
-        return Resolve(enabledPin ?? enabledRow, urlPin ?? urlRow, source);
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            warn?.Invoke($"The Redis settings could not be read before the start ({e.GetType().Name}); Redis is off for this process unless the environment says otherwise.");
+        }
+        return Resolve(
+            string.IsNullOrEmpty(enabledRow) ? enabledEnv : enabledRow,
+            string.IsNullOrEmpty(urlRow) ? urlEnv : urlRow,
+            SourceName(SettingsService.SourceOf(enabledEnv, enabledRow), SettingsService.SourceOf(urlEnv, urlRow)));
     }
 
     /// <summary>The pair as saved now, through the settings service, for the restart-pending check.</summary>
     public static async Task<Choice> LoadAsync(SettingsService settings, CancellationToken ct) =>
         Resolve(await settings.GetAsync(EnabledKey, ct), await settings.GetAsync(UrlKey, ct),
-            SettingsService.IsLocked(EnabledKey) || SettingsService.IsLocked(UrlKey) ? "environment" : "setting");
+            SourceName(await settings.SourceAsync(EnabledKey, ct), await settings.SourceAsync(UrlKey, ct)));
+
+    /// <summary>Where the pair comes from: a saved half makes it the setting's, else a variable the environment's.</summary>
+    private static string SourceName(SettingSource enabled, SettingSource url) =>
+        enabled == SettingSource.Saved || url == SettingSource.Saved ? "setting"
+        : enabled == SettingSource.Environment || url == SettingSource.Environment ? "environment"
+        : "default";
 
     /// <summary>Whether a restart would change what this process does with Redis: on to off, off to on, or another address.</summary>
     public static bool RestartPending(Choice bound, Choice saved) =>

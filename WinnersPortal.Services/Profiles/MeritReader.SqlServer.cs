@@ -11,12 +11,13 @@ namespace WinnersPortal.Services.Profiles;
 /// </summary>
 public static partial class MeritReader
 {
-    private static async Task<Merit.Record> RecordSqlAsync(Sql sql, Guid userId, CancellationToken ct) =>
-        await sql.SingleOrDefaultAsync<Merit.Record>(Procedures.MeritRecord, new { userId }, ct)
+    private static async Task<Merit.Record> RecordSqlAsync(Sql sql, Guid userId, DateTimeOffset now, CancellationToken ct) =>
+        await sql.SingleOrDefaultAsync<Merit.Record>(Procedures.MeritRecord, new { userId, now }, ct)
         ?? new Merit.Record(0, 0, 0, 0, 0, 0);
 
-    private static Task<MeritReads> MeritReadsSqlAsync(Sql sql, IReadOnlyCollection<Guid> userIds, CancellationToken ct) =>
-        sql.MultipleAsync(Procedures.MeritReads, new { ids = Sql.JsonIds(userIds) }, async grid =>
+    private static Task<MeritReads> MeritReadsSqlAsync(
+        Sql sql, IReadOnlyCollection<Guid> userIds, DateTimeOffset now, CancellationToken ct) =>
+        sql.MultipleAsync(Procedures.MeritReads, new { ids = Sql.JsonIds(userIds), now }, async grid =>
         {
             var profiles = (await grid.ReadAsync<ProfileRow>()).ToList();
             var github = (await grid.ReadAsync<Guid>()).ToHashSet();

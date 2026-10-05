@@ -71,7 +71,7 @@ BEGIN
 
     SELECT c.[Id], c.[Slug], c.[Title], c.[AwardAmount], c.[Currency], c.[Category], c.[Subcategory], c.[MinMeritScore],
            LEFT(c.[BriefMarkdown], 240) AS [Brief240], c.[DeadlineUtc], c.[StartsAtUtc], c.[EntryCloseUtc], c.[PublishedAtUtc],
-           c.[Status], c.[Delivery], c.[RequiresCompose], c.[ClientId], k.[DisplayName] AS [ClientName], k.[AvatarUpdatedAtUtc] AS [ClientAvatarAt],
+           c.[Status], c.[Delivery], c.[Kind], c.[RequiresCompose], c.[ClientId], k.[DisplayName] AS [ClientName], k.[AvatarUpdatedAtUtc] AS [ClientAvatarAt],
            c.[ActiveEntryCount] AS [EntrantCount], c.[MilestoneCount], k.[AwardsPaidCount] AS [ClientAwardsPaid],
            k.[RatingCount] AS [ClientRatingCount],
            CASE WHEN k.[RatingCount] = 0 THEN NULL ELSE CAST(k.[RatingSum] AS float) / k.[RatingCount] END AS [ClientRatingAvg]

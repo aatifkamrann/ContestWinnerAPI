@@ -37,7 +37,7 @@ public static class SqlServerRequirements
         if (r.MajorVersion < MinMajorVersion)
             return $"SQL Server {r.ProductVersion} ({r.Edition}) is too old: the portal needs SQL Server 2022 or later "
                 + $"(ProductMajorVersion {MinMajorVersion} or above; this server reports {r.MajorVersion}). "
-                + "Install SQL Server 2022 or 2025 — Express will do in its Advanced download, which carries Full-Text Search — or point ConnectionStrings__Db at one.";
+                + "Install SQL Server 2022 or 2025 — Express will do in its Advanced download, which carries Full-Text Search — or connect the portal to one.";
         if (!r.FullTextInstalled)
             return $"SQL Server {r.ProductVersion} has no Full-Text Search (SERVERPROPERTY('IsFullTextInstalled') = 0), "
                 + "and opportunity search runs on it. Windows: re-run SQL Server setup, Add features, tick "

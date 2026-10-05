@@ -55,7 +55,7 @@ public sealed partial class ReportService
             rows.Where(r => r.Status == EntryStatus.Active
                     && r.OpportunityStatus is OpportunityStatus.Open or OpportunityStatus.Reviewing)
                 .Select(r => r.OpportunityId).Distinct().ToList(),
-            now, ct);
+            now, await buildHost.ReadyAsync(ct), ct);
 
         return Outcome.Ok(new EntriesReportResponse
         {

@@ -24,8 +24,9 @@ public sealed class PreviewWorkSignal(WorkRelay? relay = null) : WorkSignal("pre
 /// after <see cref="CheckpointBuilds.MaxAttempts"/> tries, marked failed
 /// as unreachable; a build the host still calls running past its timeout
 /// is given up. A failed build tells the entrant; an unreachable host
-/// tells the log, because that is nobody's build to fix. Nothing runs
-/// while no build host setup is active: the rows wait, Pending.
+/// tells the log, because that is nobody's build to fix. Nothing new is
+/// handed over while no build host setup is active and passing its test
+/// (<see cref="BuildHostService"/>): the rows wait, Pending.
 ///
 /// It carries the previews the same way: a Preview row asked for (Pending)
 /// is handed to the host to check out and start; a starting or running one
@@ -75,17 +76,20 @@ public sealed class PreviewWorker(
 
     private async Task RunCycleAsync(CancellationToken ct)
     {
-        var config = await host.ActiveConfigAsync(ct);
-        if (config is null) return; // nothing to build on; the rows keep waiting
-
         using var scope = scopes.CreateScope();
+        var state = await scope.ServiceProvider.GetRequiredService<BuildHostService>().StateAsync(ct);
+        if (state.Config is not { } config) return; // nothing to build on; the rows keep waiting
+
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var now = DateTimeOffset.UtcNow;
-        await StartDueAsync(db, config, now, ct);
+        // Nothing new goes to a host that has not passed its test: queued
+        // builds and asked-for previews wait, Pending, until one does. What
+        // is already there is still followed, and stopped when asked.
+        if (state.Ready) await StartDueAsync(db, config, now, ct);
         await FollowAsync(db, config, now, ct);
 
         await StopRequestedAsync(db, config, now, ct);
-        await StartRunsAsync(db, config, now, ct);
+        if (state.Ready) await StartRunsAsync(db, config, now, ct);
         await FollowRunsAsync(db, config, now, ct);
     }
 

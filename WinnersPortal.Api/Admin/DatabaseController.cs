@@ -20,15 +20,28 @@ public sealed class DatabaseController(DatabaseAdminService database) : Controll
     // and is never echoed.
     [HttpPost("api/admin/database/test")]
     [Authorize(Policy = "admin")]
-    public async Task<IResult> PostDatabaseTest(DatabaseTargetRequest request, CancellationToken ct) =>
+    public async Task<IResult> PostDatabaseTest(DatabaseConnectionFields request, CancellationToken ct) =>
         (await database.TestAsync(request, ct)).ToResult();
 
     // Starts the move; 202 with the state to poll, 409 while one runs.
     [HttpPost("api/admin/database/move")]
     [Authorize(Policy = "admin")]
-    public IResult PostDatabaseMove(DatabaseTargetRequest request)
+    public IResult PostDatabaseMove(DatabaseConnectionFields request)
     {
         var outcome = database.Move(request, Principal.Email(User) ?? "an administrator");
+        return outcome.Kind == WinnersPortal.Services.Common.OutcomeKind.Ok
+            ? Results.Accepted("/api/admin/database/move", outcome.Body)
+            : outcome.ToResult();
+    }
+
+    // Saves an edited connection onto this portal's own data — a new
+    // password, a new host, a restored copy — and restarts on it; 202 with
+    // the state to poll, 409 when the database is not this portal's.
+    [HttpPost("api/admin/database/connection")]
+    [Authorize(Policy = "admin")]
+    public async Task<IResult> PostDatabaseConnection(DatabaseConnectionFields request, CancellationToken ct)
+    {
+        var outcome = await database.ChangeAsync(request, Principal.Email(User) ?? "an administrator", ct);
         return outcome.Kind == WinnersPortal.Services.Common.OutcomeKind.Ok
             ? Results.Accepted("/api/admin/database/move", outcome.Body)
             : outcome.ToResult();

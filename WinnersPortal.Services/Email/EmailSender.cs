@@ -1,5 +1,6 @@
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
 using MailKit.Security;
 using MimeKit;
 using WinnersPortal.Services.Settings;
@@ -19,7 +20,7 @@ namespace WinnersPortal.Services.Email;
 /// The outbox sends through the active one; the test sends through one named
 /// setup, active or not.</para>
 /// </summary>
-public sealed class EmailSender(SettingsService settings, IHttpClientFactory httpFactory, ILogger<EmailSender> log)
+public sealed partial class EmailSender(SettingsService settings, IHttpClientFactory httpFactory, ILogger<EmailSender> log)
 {
     public const string HttpClientName = "email";
 
@@ -97,12 +98,24 @@ public sealed class EmailSender(SettingsService settings, IHttpClientFactory htt
     /// the server's own words, then what most often causes it: a space at
     /// either end of the password (kept as typed, since a password may carry
     /// one on purpose), and on Brevo's relay the two values its SMTP & API
-    /// page invites pasting in the wrong place.
+    /// page invites pasting in the wrong place. A server that names an IP
+    /// address in its refusal (Brevo's "525 5.7.1 Unauthorized IP address")
+    /// takes sign-ins only from the addresses on its list, whatever the user
+    /// and password, so that answer points at the list instead.
     /// </summary>
     public static string SignInRefused(SetupValues s, string? serverSaid)
     {
+        var said = serverSaid?.Trim().TrimEnd('.') is { Length: > 0 } text ? text : null;
+        if (said is not null && NamesAnAddress().IsMatch(said))
+            return string.Join(" ",
+                "The SMTP server refused the sign-in because of the IP address this server sends from.",
+                $"It answered: “{said}”.",
+                IsBrevoRelay(s)
+                    ? "Brevo takes sign-ins only from the addresses under Security → Authorized IPs — add this server's public IP address there, or turn that restriction off."
+                    : "Add this server's public IP address to the mail service's list of allowed addresses.");
+
         var parts = new List<string> { "The SMTP server refused the sign-in — check the SMTP user and password." };
-        if (serverSaid?.Trim().TrimEnd('.') is { Length: > 0 } said)
+        if (said is not null)
             parts.Add($"It answered: “{said}”.");
         var password = s.Get("email.smtpPassword") ?? "";
         if (password.Length > 0 && password.Trim().Length != password.Length)
@@ -114,6 +127,9 @@ public sealed class EmailSender(SettingsService settings, IHttpClientFactory htt
                   + "not the account's email) and the password an SMTP key (xsmtpsib-…).");
         return string.Join(" ", parts);
     }
+
+    [GeneratedRegex(@"\bIP\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex NamesAnAddress();
 
     private static bool IsBrevoRelay(SetupValues s) =>
         s.Get("email.smtpHost")?.Trim().ToLowerInvariant() is { } host

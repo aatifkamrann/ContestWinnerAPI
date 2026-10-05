@@ -1,9 +1,11 @@
 -- Many people's merit at once, four result sets over the ids as JSON: the
 -- written half of their profiles measured (counts, never the text beyond
 -- the headline), who among them connected GitHub, every contested entry
--- with the counts the record is scored from, and their ratings summed.
+-- with the counts the record is scored from, and their ratings summed. A
+-- dated milestone counts once it is claimed or its date has passed.
 CREATE OR ALTER PROCEDURE [dbo].[Merit_Reads]
-    @ids nvarchar(max)
+    @ids nvarchar(max),
+    @now datetimeoffset
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -30,7 +32,9 @@ BEGIN
             JOIN [Milestones] m ON m.[Id] = cp.[MilestoneId]
             WHERE cp.[EntryId] = e.[Id] AND m.[DueUtc] IS NOT NULL AND cp.[ClaimedAtUtc] <= m.[DueUtc]) AS [OnTime],
            (SELECT COUNT(*) FROM [Milestones] m
-            WHERE m.[OpportunityId] = e.[OpportunityId] AND m.[DueUtc] IS NOT NULL) AS [Dated],
+            WHERE m.[OpportunityId] = e.[OpportunityId] AND m.[DueUtc] IS NOT NULL
+              AND (m.[DueUtc] <= @now OR EXISTS (SELECT 1 FROM [Checkpoints] cp
+                                                 WHERE cp.[EntryId] = e.[Id] AND cp.[MilestoneId] = m.[Id]))) AS [Dated],
            CAST(CASE WHEN EXISTS (SELECT 1 FROM [Awards] a WHERE a.[EntryId] = e.[Id]) THEN 1 ELSE 0 END AS bit) AS [Won]
     FROM [Entries] e
     JOIN @people ids ON ids.[Id] = e.[FreelancerId]

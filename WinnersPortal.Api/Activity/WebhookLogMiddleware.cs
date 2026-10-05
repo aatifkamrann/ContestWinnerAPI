@@ -87,7 +87,7 @@ public sealed class WebhookLogMiddleware(RequestDelegate next)
                 Service = service,
                 Method = ctx.Request.Method.ToUpperInvariant(),
                 Path = ActivityNames.Trim(ctx.Request.Path.Value, ActivityNames.MaxPath) ?? "/",
-                Action = ExternalWebhooks.Action(service),
+                Action = ExternalWebhooks.Action(service, ctx.Request.Path.Value),
                 Subject = ActivityNames.Trim(
                     ExternalWebhooks.Subject(service, ctx.Request.Headers["X-GitHub-Event"].ToString(), body),
                     ActivityNames.MaxSubject),

@@ -93,6 +93,21 @@ public static partial class ExternalExchange
         return message;
     }
 
+    /// <summary>A line more about the call, carried on the request for the row's Detail.</summary>
+    public static readonly HttpRequestOptionsKey<string> DetailKey = new("winnersportal.detail");
+
+    /// <summary>
+    /// Says on the activity row what the call was for, where the subject
+    /// alone does not — an AI call's feature and prompt version,
+    /// "entryDigest · prompt v1" — so a reworded prompt can be told apart
+    /// from the one before it without opening the request.
+    /// </summary>
+    public static HttpRequestMessage WithDetail(this HttpRequestMessage message, string detail)
+    {
+        message.Options.Set(DetailKey, detail);
+        return message;
+    }
+
     // ---------------------------------------------------------- naming
 
     /// <summary>The company behind a host, where it is one the portal is known to call; else the host itself.</summary>
@@ -111,6 +126,7 @@ public static partial class ExternalExchange
         ("api.anthropic.com", "Anthropic"),
         ("generativelanguage.googleapis.com", "Gemini"),
         ("didit.me", "Didit"),
+        ("shuftipro.com", "Shufti Pro"),
         ("github.com", "GitHub"),
         ("challenges.cloudflare.com", "Cloudflare Turnstile"),
         ("fcm.googleapis.com", "Firebase push"),

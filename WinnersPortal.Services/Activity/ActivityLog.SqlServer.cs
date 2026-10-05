@@ -25,4 +25,7 @@ public sealed partial class ActivityWriter
 
     private static Task<int> SweepSqlAsync(Sql sql, DateTimeOffset cutOff, CancellationToken ct) =>
         sql.ExecuteAsync(Procedures.ActivitySweep, new { cutOff }, ct);
+
+    private static Task<int> ClearAiBodiesSqlAsync(Sql sql, DateTimeOffset cutOff, CancellationToken ct) =>
+        sql.ExecuteAsync(Procedures.ActivityClearAiBodies, new { cutOff }, ct);
 }

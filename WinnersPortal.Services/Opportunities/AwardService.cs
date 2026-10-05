@@ -17,7 +17,7 @@ namespace WinnersPortal.Services.Opportunities;
 /// transfer fires on confirmed payment, never at the announcement, and the
 /// worker only writes "verified" after re-reading the repo.
 /// </summary>
-public sealed class AwardService(AppDbContext db, GitHubService github, GitHubWorkSignal githubSignal, EmailWorkSignal emailSignal, PushWorkSignal pushSignal, UnsubscribeTokens unsubscribe, ILiveBoard live, PublicReads publicReads)
+public sealed partial class AwardService(AppDbContext db, GitHubService github, GitHubWorkSignal githubSignal, EmailWorkSignal emailSignal, PushWorkSignal pushSignal, UnsubscribeTokens unsubscribe, ILiveBoard live, PublicReads publicReads)
 {
     public async Task<Outcome<AnnounceResponse>> AnnounceAsync(Guid id, AnnounceRequest request, ClaimsPrincipal principal, CancellationToken ct)
     {
@@ -25,6 +25,9 @@ public sealed class AwardService(AppDbContext db, GitHubService github, GitHubWo
         var opportunity = await db.Opportunities.Include(c => c.Client)
             .SingleOrDefaultAsync(c => c.Id == id, ct);
         if (opportunity is null || opportunity.ClientId != clientId) return Outcome.NotFound();
+        if (MilestonePay.ByMilestone(opportunity.Kind))
+            return Outcome.Conflict("This opportunity is paid by milestone: it has no winner to announce — hire one "
+                + "applicant from the review box instead.");
         if (opportunity.Status != OpportunityStatus.Reviewing)
             return Outcome.Conflict(
                 opportunity.Status == OpportunityStatus.Awarded
@@ -105,25 +108,12 @@ public sealed class AwardService(AppDbContext db, GitHubService github, GitHubWo
         if (award is null || award.Opportunity!.ClientId != clientId) return Outcome.NotFound();
         if (award.PaidAtUtc is not null)
             return Outcome.Conflict("This award is already marked paid.");
+        if (MilestonePay.ByMilestone(award.Opportunity.Kind))
+            return Outcome.Conflict("This opportunity is paid by milestone: mark each milestone paid instead — "
+                + "the last one completes the award.");
 
         award.PaidAtUtc = DateTimeOffset.UtcNow;
-
-        var configured = await github.IsConfiguredAsync(ct);
-        if (configured && award.Entry!.RepoFullName is not null && award.Opportunity.Client!.GithubLogin is not null)
-        {
-            award.Handover = HandoverStatus.Requested;
-            award.TransferTargetLogin = award.Opportunity.Client.GithubLogin;
-        }
-        else
-        {
-            award.HandoverNote = !Delivery.UsesRepository(award.Opportunity.Delivery)
-                ? "The work was handed in as files on this page — they are yours to download; nothing transfers."
-                : !configured
-                    ? "GitHub is not configured; no repository to transfer."
-                    : award.Entry!.RepoFullName is null
-                        ? "The winning entry has no repository; nothing to transfer."
-                        : "No connected GitHub account to transfer to.";
-        }
+        StartHandover(award, await github.IsConfiguredAsync(ct));
 
         // Payment confirmed is the winner's news — with the honest caveat
         // when no transfer could start, because "paid" without the repo
@@ -150,3 +140,31 @@ public sealed class AwardService(AppDbContext db, GitHubService github, GitHubWo
 }
 
 public sealed record AnnounceRequest(Guid EntryId);
+
+public sealed partial class AwardService
+{
+    /// <summary>
+    /// A paid award's handover, started: the repository's transfer to the
+    /// client's connected GitHub account is requested — the worker makes
+    /// and verifies it — or the note says why nothing transfers. The award
+    /// comes with its entry and its opportunity's client loaded. Shared by
+    /// a competitive award marked paid and the last milestone of one paid
+    /// by milestone.
+    /// </summary>
+    public static void StartHandover(Award award, bool githubConfigured)
+    {
+        if (githubConfigured && award.Entry!.RepoFullName is not null && award.Opportunity!.Client!.GithubLogin is not null)
+        {
+            award.Handover = HandoverStatus.Requested;
+            award.TransferTargetLogin = award.Opportunity.Client.GithubLogin;
+            return;
+        }
+        award.HandoverNote = !Delivery.UsesRepository(award.Opportunity!.Delivery)
+            ? "The work was handed in as files on this page — they are yours to download; nothing transfers."
+            : !githubConfigured
+                ? "GitHub is not configured; no repository to transfer."
+                : award.Entry!.RepoFullName is null
+                    ? "The winning entry has no repository; nothing to transfer."
+                    : "No connected GitHub account to transfer to.";
+    }
+}

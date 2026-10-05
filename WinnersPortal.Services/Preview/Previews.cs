@@ -35,6 +35,19 @@ public static class Previews
         return null;
     }
 
+    /// <summary>Why an opportunity cannot ask for Docker Compose now: a requirement nothing checks is one nobody should enter on.</summary>
+    public const string ComposeUnavailable =
+        "Docker Compose builds are not available on this portal right now — an administrator has to switch on a "
+        + "build host and pass its test first (Settings → Build host).";
+
+    public const string PublishWithoutBuilds =
+        "This draft asks entries to run with Docker Compose, and builds are not available on this portal right now. "
+        + "Open it in the editor and save it again, which drops the requirement, or ask an administrator to switch on "
+        + "and test the build host.";
+
+    public const string PreviewsOff =
+        "Previews are off until an administrator switches on the build host and it passes its test.";
+
     public const string NoAddress =
         "Previews are not set up on this portal yet — an administrator sets a preview address under Settings → Build host.";
 

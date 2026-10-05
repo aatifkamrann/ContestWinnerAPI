@@ -8,6 +8,9 @@ public sealed record OperationsResponse
     public required IEnumerable<HandoverRow> Handovers { get; init; }
     public required List<WebhookDeliveryRow> Deliveries { get; init; }
     public required SlowQueriesSection SlowQueries { get; init; }
+
+    /// <summary>What the AI features cost: today and the last thirty days, by feature and by model.</summary>
+    public required Ai.AiUsageSection AiUsage { get; init; }
 }
 
 /// <summary>A repository that failed to provision, or is still retrying after a failure.</summary>

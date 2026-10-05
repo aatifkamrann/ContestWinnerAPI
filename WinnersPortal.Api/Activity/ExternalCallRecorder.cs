@@ -2,6 +2,7 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Net.Http.Json;
 using WinnersPortal.Domain;
 using WinnersPortal.Services.Activity;
+using WinnersPortal.Services.Ai;
 using WinnersPortal.Services.Auth;
 
 namespace WinnersPortal.Api.Activity;
@@ -40,9 +41,38 @@ public sealed class ExternalCallRecorder(string service, ActivityLog log, IHttpC
             throw;
         }
         var elapsed = clock.ElapsedMilliseconds;
-        var answered = await SafelyAsync(() => ResponseTextAsync(response, elapsed, secrets, ct));
-        Record(request, at, elapsed, (int)response.StatusCode, sent, answered);
+        string? tokens = null;
+        var answered = await SafelyAsync(async () =>
+        {
+            var (text, body) = await ResponseTextAsync(response, elapsed, secrets, ct);
+            tokens = Tokens(request, response, body);
+            return text;
+        });
+        Record(request, at, elapsed, (int)response.StatusCode, sent, answered, tokens);
         return response;
+    }
+
+    /// <summary>
+    /// An AI answer's token count, read off the body the recorder has just
+    /// buffered, for the row's Detail — "entryDigest · prompt v1 · 1,234 in
+    /// · 567 out" — so what a call cost is on the row beside what it was
+    /// for, without opening the response. The provider is the one the
+    /// subject names; a body that cannot be read leaves the detail alone.
+    /// </summary>
+    private string? Tokens(HttpRequestMessage request, HttpResponseMessage response, string? body)
+    {
+        if (service != ExternalServices.Ai || !response.IsSuccessStatusCode || body is null) return null;
+        var provider = request.Options.TryGetValue(ExternalExchange.SubjectKey, out var subject)
+            ? AiProviders.ParseCallName(subject)?.Provider
+            : null;
+        try
+        {
+            return provider is null ? null : AiProviderRequests.ReadTokens(provider, body)?.ToString();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private async Task<string> RequestTextAsync(HttpRequestMessage request, IReadOnlyCollection<string> secrets, CancellationToken ct)
@@ -67,12 +97,14 @@ public sealed class ExternalCallRecorder(string service, ActivityLog log, IHttpC
             body, secrets);
     }
 
-    private async Task<string> ResponseTextAsync(HttpResponseMessage response, long elapsed, IReadOnlyCollection<string> secrets, CancellationToken ct)
+    /// <returns>The row's text, and the body as it came where it was read — for the token count, nothing else.</returns>
+    private async Task<(string Text, string? Body)> ResponseTextAsync(HttpResponseMessage response, long elapsed, IReadOnlyCollection<string> secrets, CancellationToken ct)
     {
         var content = response.Content;
         var type = ExternalExchange.MediaType(content.Headers);
         var length = content.Headers.ContentLength;
         string? body;
+        string? raw = null;
         if (length == 0) body = null;
         else if (service == ExternalServices.Storage && response.IsSuccessStatusCode)
             body = ExternalExchange.Described(length, type, "file contents are not recorded");
@@ -85,13 +117,14 @@ public sealed class ExternalCallRecorder(string service, ActivityLog log, IHttpC
             // Buffered, so the caller still reads the whole body after us.
             await content.LoadIntoBufferAsync();
             var text = await content.ReadAsStringAsync(ct);
+            raw = text;
             body = text.Length == 0 ? null : ExternalExchange.Body(service, type, text, secrets, fromProvider: true);
         }
-        return ExternalExchange.ResponseText((int)response.StatusCode, response.ReasonPhrase, elapsed,
-            response.Headers.Concat(content.Headers), body, secrets);
+        return (ExternalExchange.ResponseText((int)response.StatusCode, response.ReasonPhrase, elapsed,
+            response.Headers.Concat(content.Headers), body, secrets), raw);
     }
 
-    private void Record(HttpRequestMessage request, DateTimeOffset at, long elapsed, int status, string? sent, string? answered)
+    private void Record(HttpRequestMessage request, DateTimeOffset at, long elapsed, int status, string? sent, string? answered, string? tokens = null)
     {
         try
         {
@@ -113,6 +146,11 @@ public sealed class ExternalCallRecorder(string service, ActivityLog log, IHttpC
                 Subject = request.Options.TryGetValue(ExternalExchange.SubjectKey, out var subject)
                     ? ActivityNames.Trim(subject, ActivityNames.MaxSubject)
                     : null,
+                Detail = ActivityNames.Trim(
+                    request.Options.TryGetValue(ExternalExchange.DetailKey, out var detail)
+                        ? tokens is null ? detail : $"{detail} · {tokens}"
+                        : tokens,
+                    ActivityNames.MaxDetail),
                 Page = ctx is null ? null : ActivityNames.PageOf(ctx.Request.Headers.Referer),
                 Status = status,
                 DurationMs = (int)Math.Min(elapsed, int.MaxValue),

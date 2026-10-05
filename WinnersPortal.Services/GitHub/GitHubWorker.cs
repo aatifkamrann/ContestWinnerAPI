@@ -84,7 +84,11 @@ public sealed class GitHubWorker(
             .Include(c => c.Client)
             .Include(c => c.Entries.Where(e => e.Status == EntryStatus.Active))
             .ThenInclude(e => e.Freelancer)
-            .Where(c => c.Status == OpportunityStatus.Open && c.DeadlineUtc != null && c.DeadlineUtc <= now)
+            // Paid by milestone there is no review to move to: the client
+            // hires while it is open, and the milestones' own dates run the
+            // work after that.
+            .Where(c => c.Status == OpportunityStatus.Open && c.Kind == OpportunityKind.Competitive
+                && c.DeadlineUtc != null && c.DeadlineUtc <= now)
             .ToListAsync(ct);
         foreach (var opportunity in toReview)
         {
@@ -141,7 +145,10 @@ public sealed class GitHubWorker(
                 // An upload-only opportunity hands out no repositories; its
                 // entries stay Pending forever and that is not a backlog.
                 && e.Opportunity!.Delivery != OpportunityDelivery.Upload
-                && e.Opportunity!.Status == OpportunityStatus.Open)
+                // Paid by milestone, the one entry is made by the hire, the
+                // moment the opportunity turns awarded.
+                && (e.Opportunity!.Status == OpportunityStatus.Open
+                    || (e.Opportunity.Kind == OpportunityKind.Milestones && e.Opportunity.Status == OpportunityStatus.Awarded)))
             .OrderBy(e => e.CreatedAtUtc)
             .Take(10)
             .ToListAsync(ct);
@@ -321,7 +328,13 @@ public sealed class GitHubWorker(
             .Where(e => e.Status == EntryStatus.Active
                 && e.ProvisionStatus == RepoProvisionStatus.Provisioned
                 && e.FrozenAtUtc == null
-                && (e.Opportunity!.Status == OpportunityStatus.Reviewing || e.Opportunity.Status == OpportunityStatus.Awarded))
+                && ((e.Opportunity!.Kind == OpportunityKind.Competitive
+                        && (e.Opportunity.Status == OpportunityStatus.Reviewing || e.Opportunity.Status == OpportunityStatus.Awarded))
+                    // Paid by milestone the hired freelancer pushes until the
+                    // last milestone is paid, and the repository freezes then,
+                    // on its way to the client.
+                    || (e.Opportunity.Kind == OpportunityKind.Milestones
+                        && db.Awards.Any(a => a.EntryId == e.Id && a.PaidAtUtc != null))))
             .Take(10)
             .ToListAsync(ct);
 
@@ -359,8 +372,11 @@ public sealed class GitHubWorker(
             .Where(e => e.Status == EntryStatus.Active
                 && e.ProvisionStatus == RepoProvisionStatus.Provisioned
                 && e.ReviewAccessGrantedAtUtc == null
-                && e.FrozenAtUtc != null
-                && (e.Opportunity!.Status == OpportunityStatus.Reviewing || e.Opportunity.Status == OpportunityStatus.Awarded)
+                && ((e.FrozenAtUtc != null
+                        && (e.Opportunity!.Status == OpportunityStatus.Reviewing || e.Opportunity.Status == OpportunityStatus.Awarded))
+                    // Paid by milestone the client reads the work as it
+                    // grows — each milestone is reviewed before it is paid.
+                    || (e.Opportunity!.Kind == OpportunityKind.Milestones && e.Opportunity.Status == OpportunityStatus.Awarded))
                 && e.Opportunity.Client!.GithubLogin != null)
             .Take(10)
             .ToListAsync(ct);

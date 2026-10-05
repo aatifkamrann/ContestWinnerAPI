@@ -496,7 +496,7 @@ public sealed class ProfileService(AppDbContext db, GitHubService github, Paymen
             GithubLogin = account.GithubLogin,
             // Whether the connect round trip exists on this portal at all —
             // the profile shows the button on that, and the merit breakdown
-            // drops the GitHub line's three points where it does not.
+            // drops the GitHub line's two points where it does not.
             GithubConnectable = githubOffered,
             MemberSince = account.CreatedAtUtc,
             Own = own,

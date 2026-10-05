@@ -9,9 +9,10 @@ namespace WinnersPortal.Services.Database;
 /// <summary>
 /// The database an in-app move chose, written beside the data-protection
 /// keys: the one persisted, uncommitted, already-backed-up directory both
-/// deployments have. The provider, server and database are plain, so a
-/// backup script can read where the data is; the connection string, with
-/// its password, is protected under the same key ring the settings use.
+/// deployments have. The provider, server, database and user are plain, so
+/// a backup script can read where the data is and whom to sign in as; the
+/// connection string, with its password, is protected under the same key
+/// ring the settings use.
 /// </summary>
 public sealed record DatabaseOverride(
     DatabaseProvider Provider, string Server, string Database, string ConnectionString,
@@ -29,9 +30,14 @@ public static class DatabaseOverrideFile
 
     public static string PathIn(string keysDir) => Path.Combine(keysDir, FileName);
 
+    private const string DeleteToReturn =
+        "Delete it to return to the database ConnectionStrings__Db names — or, with none, to the setup page that asks for one.";
+
+    // Version 2 added UserName (null for Windows sign-in); a version 1 file
+    // reads with none.
     private sealed record Stored(
         int Version, string Provider, string Server, string Database, string ConnectionString,
-        DateTimeOffset WrittenAtUtc, string WrittenBy);
+        DateTimeOffset WrittenAtUtc, string WrittenBy, string? UserName = null);
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -46,10 +52,10 @@ public static class DatabaseOverrideFile
         }
         catch (JsonException e)
         {
-            throw new DatabaseOverrideException($"{path} is not the database override this portal writes ({e.Message}). Delete it to return to the database named by ConnectionStrings__Db.");
+            throw new DatabaseOverrideException($"{path} is not the database override this portal writes ({e.Message}). " + DeleteToReturn);
         }
         if (stored is null || string.IsNullOrWhiteSpace(stored.ConnectionString))
-            throw new DatabaseOverrideException($"{path} names no database. Delete it to return to the database named by ConnectionStrings__Db.");
+            throw new DatabaseOverrideException($"{path} names no database. " + DeleteToReturn);
         string connectionString;
         try
         {
@@ -62,8 +68,8 @@ public static class DatabaseOverrideFile
             // the portal's data between two servers, so this is a stop.
             throw new DatabaseOverrideException(
                 $"{path} was written under a data-protection key ring this portal no longer has, so the database it "
-                + "names cannot be read. Restore the keys directory it was written with, or delete the file to return "
-                + "to the database named by ConnectionStrings__Db.");
+                + "names cannot be read. Restore the keys directory it was written with, or delete the file: the API "
+                + "then starts on the database ConnectionStrings__Db names, or with none, on the setup page's connect step.");
         }
         return new DatabaseOverride(
             DatabaseProviders.Parse(stored.Provider), stored.Server, stored.Database, connectionString,
@@ -73,8 +79,9 @@ public static class DatabaseOverrideFile
     /// <summary>Written whole to a sibling, then moved over: a crash mid-write leaves the old file, never half of the new.</summary>
     public static void Write(string path, DatabaseOverride o, IDataProtector protector)
     {
-        var stored = new Stored(1, DatabaseProviders.Name(o.Provider), o.Server, o.Database,
-            protector.Protect(o.ConnectionString), o.WrittenAtUtc, o.WrittenBy);
+        var stored = new Stored(2, DatabaseProviders.Name(o.Provider), o.Server, o.Database,
+            protector.Protect(o.ConnectionString), o.WrittenAtUtc, o.WrittenBy,
+            DatabaseConnections.UserOf(o.Provider, o.ConnectionString));
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(stored, Json));
         File.Move(tmp, path, overwrite: true);

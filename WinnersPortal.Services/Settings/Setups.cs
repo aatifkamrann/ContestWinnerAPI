@@ -21,7 +21,12 @@ namespace WinnersPortal.Services.Settings;
 /// fingerprint (SetupTestLog) leaves one out while it is blank or at its
 /// default, so adding it did not turn every passed test into "Changed since test".
 /// </param>
-public sealed record SetupKind(string Group, string ListKey, IReadOnlyList<string> Fields, IReadOnlyList<string>? Later = null);
+/// <param name="Unproved">
+/// Fields a test says nothing about — a switch that decides when the setup is
+/// used, not whether it works — so flipping one is not "Changed since test".
+/// </param>
+public sealed record SetupKind(
+    string Group, string ListKey, IReadOnlyList<string> Fields, IReadOnlyList<string>? Later = null, IReadOnlyList<string>? Unproved = null);
 
 /// <summary>One setup as the list keeps it: which, what the administrator calls it, and whether it is the active one.</summary>
 public sealed record SetupEntry(string Id, string Name, bool Enabled);
@@ -72,14 +77,24 @@ public static partial class Setups
         PhoneSender.UrlKey, PhoneSender.HeaderKey, PhoneSender.BodyKey,
     ]);
 
-    /// <summary>Only the provider, key and model: the switches, the ceiling and the features govern every provider at once.</summary>
-    public static readonly SetupKind Ai = new("ai", "setups.ai", ["ai.provider", "ai.apiKey", "ai.model"]);
+    /// <summary>
+    /// The provider, key and model, and whether the setup stands by for the
+    /// active one (<see cref="AiOptions.StandbyKey"/>): the switches, the
+    /// ceiling and the features govern every provider at once.
+    /// </summary>
+    public static readonly SetupKind Ai = new("ai", "setups.ai", ["ai.provider", "ai.apiKey", "ai.model", AiOptions.StandbyKey],
+        Unproved: [AiOptions.StandbyKey]);
 
-    /// <summary>The provider, its key, the workflow to run and the secret its webhooks are signed with; the switches govern every setup at once.</summary>
+    /// <summary>
+    /// The provider, its key, Didit's workflow and webhook secret, and Shufti
+    /// Pro's client ID; the switches govern every setup at once. The screen
+    /// shows a setup only the fields its provider reads (IdentityProviders.FieldsOf).
+    /// </summary>
     public static readonly SetupKind Identity = new("identity", "setups.identity",
     [
-        "identity.provider", "identity.apiKey", "identity.workflowId", "identity.webhookSecret",
-    ]);
+        "identity.provider", "identity.clientId", "identity.apiKey", "identity.workflowId", "identity.webhookSecret",
+    ],
+    Later: ["identity.clientId"]);
 
     /// <summary>
     /// Where the build agent answers and the token it was installed with;

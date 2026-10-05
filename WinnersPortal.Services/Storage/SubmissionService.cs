@@ -32,7 +32,11 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
             return Outcome.Conflict("This entry is no longer active.");
         if (!Delivery.UsesUpload(entry.Opportunity!.Delivery))
             return Outcome.Conflict("This opportunity is delivered through GitHub — push to your repository instead.");
-        if (Delivery.UploadProblem(entry.Opportunity.Status, entry.Opportunity.DeadlineUtc, DateTimeOffset.UtcNow) is { } shut)
+        var book = MilestonePay.ByMilestone(entry.Opportunity.Kind)
+            ? await MilestonePaymentService.ReadAsync(db, entry.OpportunityId, entry.Id, ct)
+            : null;
+        if (Delivery.UploadProblem(entry.Opportunity.Status, entry.Opportunity.DeadlineUtc, DateTimeOffset.UtcNow,
+                entry.Opportunity.Kind, book is not null && MilestonePay.Complete(book.States)) is { } shut)
             return Outcome.Conflict(shut);
         if (await storage.UploadSetupAsync(ct) is not { } storageSetup)
             return Outcome.Conflict("File storage is not configured on this portal yet — ask the operator.");
@@ -44,6 +48,11 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
             milestone = entry.Opportunity.Milestones.SingleOrDefault(m => m.Order == number - 1);
             if (milestone is null)
                 return Outcome.Invalid($"This opportunity has no milestone {number}.");
+            // Paid by milestone, a file tagged with one hands it in — so only
+            // the milestone being worked on, said now rather than after the
+            // bytes have travelled.
+            if (book is not null && MilestonePay.ClaimProblem(entry.Opportunity.Status, book.States, number - 1) is { } closed)
+                return Outcome.Conflict(closed);
         }
 
         // Reservations that never became uploads free their slot here —
@@ -99,7 +108,10 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         var opportunity = entry.Opportunity!;
         if (entry.Status != EntryStatus.Active)
             return Outcome.Conflict("This entry is no longer active.");
-        if (Delivery.UploadProblem(opportunity.Status, opportunity.DeadlineUtc, DateTimeOffset.UtcNow) is { } closed)
+        var byMilestone = MilestonePay.ByMilestone(opportunity.Kind);
+        var complete = byMilestone
+            && MilestonePay.Complete((await MilestonePaymentService.ReadAsync(db, opportunity.Id, entry.Id, ct)).States);
+        if (Delivery.UploadProblem(opportunity.Status, opportunity.DeadlineUtc, DateTimeOffset.UtcNow, opportunity.Kind, complete) is { } closed)
             return Outcome.Conflict(closed);
 
         // The declared size was the promise; the bytes are the truth.
@@ -113,7 +125,7 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         // into a frozen repository, made explicit because here the
         // entrant is still looking at the page.
         var now = DateTimeOffset.UtcNow;
-        if (Delivery.UploadProblem(opportunity.Status, opportunity.DeadlineUtc, now) is { } shut)
+        if (Delivery.UploadProblem(opportunity.Status, opportunity.DeadlineUtc, now, opportunity.Kind, complete) is { } shut)
         {
             await storage.DeleteAsync(submission.StorageSetup, submission.StorageKey, ct);
             db.Submissions.Remove(submission);
@@ -133,7 +145,19 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         // milestone is stored plain, so the board and the file agree
         // about which upload the claim points at.
         var claimed = false;
-        if (submission.MilestoneId is { } milestoneId)
+        if (byMilestone && submission.MilestoneId is not null)
+        {
+            // Paid by milestone: the file hands the milestone in, or hands
+            // it in again after a request for changes. Saved with the file.
+            var order = submission.Milestone!.Order;
+            var (problem, _, _) = await MilestonePaymentService.HandInAsync(
+                db, entry, opportunity, order, "upload", submission.FileName, null, now, ct);
+            // Refused — handed in meanwhile, or no longer the one open — the
+            // file is kept plain, as a competitive late claim is.
+            if (problem is not null) submission.MilestoneId = null;
+            else claimed = true;
+        }
+        else if (submission.MilestoneId is { } milestoneId)
         {
             var already = await db.Checkpoints.AnyAsync(
                 cp => cp.EntryId == entry.Id && cp.MilestoneId == milestoneId, ct);

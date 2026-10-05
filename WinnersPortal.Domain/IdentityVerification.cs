@@ -25,6 +25,21 @@ public sealed class IdentityVerification
 
     public IdentityStatus Status { get; set; }
 
+    /// <summary>
+    /// The provider's own page for this session, kept while the member may
+    /// still finish it — what the profile's "Continue verification" hands
+    /// back, so a closed tab is picked up rather than started over. Cleared
+    /// once the session is decided, under review, or lapsed.
+    /// </summary>
+    public string? SessionUrl { get; set; }
+
+    /// <summary>
+    /// The page on this portal the member started from — an application's
+    /// eligibility step, a draft opportunity — where the return page sends
+    /// them once the provider has answered. A path, never an address.
+    /// </summary>
+    public string? ReturnPath { get; set; }
+
     /// <summary>The provider's own event id of the last webhook applied, so a redelivery is a no-op.</summary>
     public string? LastEventId { get; set; }
 

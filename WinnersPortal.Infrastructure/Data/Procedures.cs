@@ -60,6 +60,7 @@ public static class Procedures
     public static readonly Procedure ActivityPage = new("Activity_Page");
     public static readonly Procedure ActivityInsert = new("Activity_Insert");
     public static readonly Procedure ActivitySweep = new("Activity_Sweep");
+    public static readonly Procedure ActivityClearAiBodies = new("Activity_ClearAiBodies");
     public static readonly Procedure ActivityExchange = new("Activity_Exchange");
     public static readonly Procedure ActivityAiModels = new("Activity_AiModels");
     public static readonly Procedure AdminOperations = new("Admin_Operations");
@@ -76,12 +77,29 @@ public static class Procedures
     public static readonly Procedure AiOwnsOpportunity = new("Ai_OwnsOpportunity");
     public static readonly Procedure AiEntryGate = new("Ai_EntryGate");
     public static readonly Procedure AiOwnsEntry = new("Ai_OwnsEntry");
+    public static readonly Procedure AiConsume = new("Ai_Consume");
+    public static readonly Procedure AiRefund = new("Ai_Refund");
+    public static readonly Procedure AiUsageToday = new("Ai_UsageToday");
+    public static readonly Procedure AiTokens = new("Ai_Tokens");
+    public static readonly Procedure AiSpend = new("Ai_Spend");
+    public static readonly Procedure AiSpendSince = new("Ai_SpendSince");
 
     // ---- the inbox behind the bell
     public static readonly Procedure InboxPage = new("Inbox_Page");
     public static readonly Procedure InboxMarkOne = new("Inbox_MarkOne");
     public static readonly Procedure InboxMarkAll = new("Inbox_MarkAll");
     public static readonly Procedure InboxSweep = new("Inbox_Sweep");
+
+    // ---- the conversations between a client and their entrants
+    public static readonly Procedure ChatThreads = new("Chat_Threads");
+    public static readonly Procedure ChatThread = new("Chat_Thread");
+    public static readonly Procedure ChatPage = new("Chat_Page");
+    public static readonly Procedure ChatMarkRead = new("Chat_MarkRead");
+    public static readonly Procedure ChatAdminList = new("Chat_AdminList");
+    public static readonly Procedure ChatAdminThread = new("Chat_AdminThread");
+    public static readonly Procedure ChatReports = new("Chat_Reports");
+    public static readonly Procedure ChatResolveReports = new("Chat_ResolveReports");
+    public static readonly Procedure ChatReportsOpen = new("Chat_ReportsOpen");
 
     // ---- the workers' and the services' set-based writes
     public static readonly Procedure EmailExpire = new("Email_Expire");

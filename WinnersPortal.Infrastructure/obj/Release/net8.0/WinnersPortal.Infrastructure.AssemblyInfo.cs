@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WinnersPortal.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ca41eb48966be2e1123d165490264feeb2490bf3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+19bf7e4080945a7598bf3665d18f62e492a80acb")]
 [assembly: System.Reflection.AssemblyProductAttribute("WinnersPortal.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WinnersPortal.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

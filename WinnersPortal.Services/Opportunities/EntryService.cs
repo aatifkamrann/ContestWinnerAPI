@@ -15,7 +15,7 @@ using WinnersPortal.Services.Settings;
 
 namespace WinnersPortal.Services.Opportunities;
 
-public sealed partial class EntryService(AppDbContext db, GitHubWorkSignal githubSignal, ILiveBoard live, ActivityNote activity, EmailWorkSignal emailSignal, AiOptions ai, AiWorkSignal aiSignal)
+public sealed partial class EntryService(AppDbContext db, GitHubWorkSignal githubSignal, ILiveBoard live, ActivityNote activity, EmailWorkSignal emailSignal, AiOptions ai, AiWorkSignal aiSignal, Preview.BuildHostService buildHost)
 {
     // GitHub's own rules: 1–39 chars, alphanumeric or hyphen, no leading,
     // trailing, or doubled hyphen. Wrong here means phase three's repo
@@ -174,7 +174,7 @@ public sealed partial class EntryService(AppDbContext db, GitHubWorkSignal githu
             rows.Where(e => e.Status == EntryStatus.Active
                     && e.OpportunityStatus is OpportunityStatus.Open or OpportunityStatus.Reviewing)
                 .Select(e => e.OpportunityId).Distinct().ToList(),
-            DateTimeOffset.UtcNow, ct);
+            DateTimeOffset.UtcNow, await buildHost.ReadyAsync(ct), ct);
 
         return Outcome.Ok(rows.Select(e => new MyEntryRow
         {
@@ -255,8 +255,10 @@ public sealed partial class EntryService(AppDbContext db, GitHubWorkSignal githu
             return No("This opportunity is no longer open for entry.");
         // The last joining date, which is the deadline unless the client
         // set an earlier one. An opportunity can be mid-build and shut to new
-        // entrants at the same time, so the two are asked separately.
-        if (!Schedule.EntryOpen(opportunity.Status, opportunity.EntryCloseUtc, opportunity.DeadlineUtc, DateTimeOffset.UtcNow))
+        // entrants at the same time, so the two are asked separately. Paid
+        // by milestone, the dates close applications, not the hire: a
+        // client may read every application and hire after they close.
+        if (!MilestonePay.ByMilestone(opportunity.Kind) && !Schedule.EntryOpen(opportunity.Status, opportunity.EntryCloseUtc, opportunity.DeadlineUtc, DateTimeOffset.UtcNow))
             return No(Schedule.EntryClosesAt(opportunity.EntryCloseUtc, opportunity.DeadlineUtc) == opportunity.DeadlineUtc
                 ? "The deadline has passed; entry is closed."
                 : "The last joining date has passed — this opportunity is closed to new entrants, "

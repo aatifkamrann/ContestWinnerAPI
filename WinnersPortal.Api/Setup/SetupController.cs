@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using WinnersPortal.Api.Auth;
 using WinnersPortal.Services.Setup;
@@ -35,10 +36,10 @@ public sealed class SetupController : ControllerBase
 
     [HttpGet("api/setup/status")]
     public async Task<IResult> GetStatus([FromServices] SettingsService settings, CancellationToken ct) =>
-        Results.Ok(new SetupStatusResponse { Completed = await settings.IsSetupCompletedAsync(ct) });
+        Results.Ok(new SetupStatusResponse { Completed = await settings.IsSetupCompletedAsync(ct), NeedsDatabase = false, Connecting = null });
 
     // Wizard prefill: resolved values for the keys the wizard shows, plus
-    // which of them are env-locked. Token-gated so strangers can't read
+    // which of them the deployment's environment supplies. Token-gated so strangers can't read
     // config off a half-installed portal.
     [HttpGet("api/setup/defaults")]
     public async Task<IResult> GetDefaults([FromServices] SettingsService settings, [FromServices] SetupToken token, [FromServices] DatabaseSelection database, CancellationToken ct)
@@ -47,17 +48,20 @@ public sealed class SetupController : ControllerBase
         if (!token.Matches(Request.Headers["X-Setup-Token"])) return Results.Unauthorized();
 
         var values = new Dictionary<string, string?>();
-        var locked = new List<string>();
+        var fromEnvironment = new List<string>();
         foreach (var key in WizardKeys)
             values[key] = await settings.GetAsync(key, ct);
-        locked.AddRange(WizardKeys.Concat(WizardSecretKeys).Where(SettingsService.IsLocked));
+        foreach (var key in WizardKeys.Concat(WizardSecretKeys))
+            if (await settings.SourceAsync(key, ct) == SettingSource.Environment) fromEnvironment.Add(key);
         // The database the API is already on, for the step that offers to
         // move it before anybody else has used it.
         var (server, name) = database.Describe();
         return Results.Ok(new SetupDefaultsResponse
         {
             Values = values,
-            Locked = locked,
+            FromEnvironment = fromEnvironment,
+            NeedsDatabase = false,
+            Connection = null,
             Database = new SetupDatabaseInfo
             {
                 Provider = DatabaseProviders.Name(database.Provider),
@@ -71,26 +75,18 @@ public sealed class SetupController : ControllerBase
     // The wizard's database step, behind the same token as the prefill:
     // the same four facts an administrator's Test reads later.
     [HttpPost("api/setup/database/test")]
-    public async Task<IResult> PostDatabaseTest(DatabaseTargetRequest request, [FromServices] SettingsService settings, [FromServices] SetupToken token, [FromServices] DatabaseSelection database, CancellationToken ct)
+    public async Task<IResult> PostDatabaseTest(DatabaseConnectionFields request, [FromServices] SettingsService settings, [FromServices] SetupToken token, [FromServices] DatabaseSelection database, [FromServices] IDataProtectionProvider protection, CancellationToken ct)
     {
         if (await settings.IsSetupCompletedAsync(ct)) return Results.NotFound();
         if (!token.Matches(Request.Headers["X-Setup-Token"])) return Results.Unauthorized();
-        DatabaseProvider provider;
-        try
-        {
-            provider = DatabaseProviders.Parse(request.Provider);
-        }
-        catch (InvalidOperationException e)
-        {
-            return Results.BadRequest(new ErrorResponse(e.Message));
-        }
-        if (string.IsNullOrWhiteSpace(request.ConnectionString))
-            return Results.BadRequest(new ErrorResponse("A connection string is required."));
-        return Results.Ok(await DatabaseProbe.TestAsync(provider, request.ConnectionString.Trim(), database, ct));
+        if (DatabaseConnections.TryBuild(request, (database.Provider, database.ConnectionString), out var provider, out var connectionString) is { } problem)
+            return Results.BadRequest(new ErrorResponse(problem));
+        return Results.Ok(await DatabaseProbe.TestAsync(provider, connectionString, database,
+            protection.CreateProtector(SettingsService.ProtectorPurpose), ProbePurpose.Move, ct));
     }
 
     [HttpPost("api/setup")]
-    public async Task<IResult> PostSetup(SetupRequest request, [FromServices] SetupService setup, [FromServices] SetupToken token, [FromServices] SettingsService settings, [FromServices] TokenService tokens, [FromServices] DatabaseMover mover, CancellationToken ct)
+    public async Task<IResult> PostSetup(SetupRequest request, [FromServices] SetupService setup, [FromServices] SetupToken token, [FromServices] SettingsService settings, [FromServices] TokenService tokens, [FromServices] DatabaseMover mover, [FromServices] DatabaseSelection database, CancellationToken ct)
     {
         if (await settings.IsSetupCompletedAsync(ct))
             return Results.Conflict(new ErrorResponse("Setup has already been completed."));
@@ -130,21 +126,16 @@ public sealed class SetupController : ControllerBase
         // administrator can run later, on a portal that holds only this
         // account and these settings. Setup is complete either way; a move
         // that cannot start says so and leaves the portal where it is.
-        if (request.Database is { ConnectionString.Length: > 0 } move)
+        if (request.Database is { } move)
         {
-            try
+            if (DatabaseConnections.TryBuild(move, (database.Provider, database.ConnectionString), out var provider, out var connectionString) is { } problem)
+                return Results.Ok(new SetupFinishedResponse { Moving = false, Error = problem });
+            var outcome = mover.Start(provider, connectionString, created.Email);
+            return Results.Ok(new SetupFinishedResponse
             {
-                var outcome = mover.Start(DatabaseProviders.Parse(move.Provider), move.ConnectionString.Trim(), created.Email);
-                return Results.Ok(new SetupFinishedResponse
-                {
-                    Moving = outcome.Kind == OutcomeKind.Ok,
-                    Error = outcome.Kind == OutcomeKind.Ok ? null : (outcome.Untyped.Body as IErrorResponse)?.Error,
-                });
-            }
-            catch (InvalidOperationException e)
-            {
-                return Results.Ok(new SetupFinishedResponse { Moving = false, Error = e.Message });
-            }
+                Moving = outcome.Kind == OutcomeKind.Ok,
+                Error = outcome.Kind == OutcomeKind.Ok ? null : (outcome.Untyped.Body as IErrorResponse)?.Error,
+            });
         }
         return Results.NoContent();
     }
@@ -166,16 +157,35 @@ public sealed record SetupDatabaseInfo
     public required string Database { get; init; }
 }
 
-/// <summary>Whether the first-run wizard has been completed.</summary>
+/// <summary>Whether the first-run wizard has been completed, and whether the API is still waiting for a database.</summary>
 public sealed record SetupStatusResponse
 {
     public required bool Completed { get; init; }
+    /// <summary>No database is connected yet: the API serves only the setup page's connect step (DatabaseBootstrap).</summary>
+    public required bool NeedsDatabase { get; init; }
+    /// <summary>The connect under way, while there is no database; null when none was started.</summary>
+    public required SetupConnectingResponse? Connecting { get; init; }
 }
 
-/// <summary>The wizard's prefill: each key's resolved value, and the keys an environment variable locks.</summary>
+/// <summary>A first connect as the setup page follows it.</summary>
+public sealed record SetupConnectingResponse
+{
+    /// <summary>checking, preparing (creating the tables), recording, starting, failed.</summary>
+    public required string Phase { get; init; }
+    public required string Server { get; init; }
+    public required string Database { get; init; }
+    public required string? Error { get; init; }
+}
+
+/// <summary>The wizard's prefill: each key's resolved value, and the keys whose value comes from the deployment's environment (editable; what is saved wins).</summary>
 public sealed record SetupDefaultsResponse
 {
     public required Dictionary<string, string?> Values { get; init; }
-    public required List<string> Locked { get; init; }
-    public required SetupDatabaseInfo Database { get; init; }
+    public required List<string> FromEnvironment { get; init; }
+    /// <summary>The database the API is on; null while it has none.</summary>
+    public required SetupDatabaseInfo? Database { get; init; }
+    /// <summary>No database is connected yet, and the page starts by connecting one.</summary>
+    public required bool NeedsDatabase { get; init; }
+    /// <summary>The connect form's starting point while there is no database; null once there is.</summary>
+    public required DatabaseConnectionView? Connection { get; init; }
 }
