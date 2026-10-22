@@ -65,7 +65,7 @@ public sealed class AiCaller(AiOptions ai, AiProviderClient client, ILogger<AiCa
         try
         {
             var answer = await client.CompleteAsync(
-                active.Provider, route.Model, active.ApiKey, prompt.System, prompt.User, schema, ct, detail);
+                active.Provider, route.Model, active.ApiKey, prompt.System, prompt.User, schema, ct, detail, active.BaseUrl);
             return new AiAnswer(answer, active.Provider, route.Model, active.Setup, Standby: false);
         }
         catch (AiProviderException e) when (route.Standby is null || !AiRules.Unreached(e))
@@ -85,7 +85,7 @@ public sealed class AiCaller(AiOptions ai, AiProviderClient client, ILogger<AiCa
         try
         {
             var answer = await client.CompleteAsync(
-                standby.Provider, model, standby.ApiKey, prompt.System, prompt.User, schema, ct, $"{detail} · {StandbyDetail}");
+                standby.Provider, model, standby.ApiKey, prompt.System, prompt.User, schema, ct, $"{detail} · {StandbyDetail}", standby.BaseUrl);
             return new AiAnswer(answer, standby.Provider, model, standby.Setup, Standby: true);
         }
         catch (AiProviderException e)

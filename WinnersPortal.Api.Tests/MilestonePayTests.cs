@@ -156,6 +156,56 @@ public class MilestonePayTests
     }
 
     [Fact]
+    public void A_review_carries_remarks_and_advice_and_only_their_length_is_checked()
+    {
+        var long_ = new string('x', MilestoneReview.MaxAdvice + 1);
+        // Approving: both optional, in any mix.
+        Assert.Null(MilestonePay.ApprovalProblem(MilestonePayState.Submitted, null, null));
+        Assert.Null(MilestonePay.ApprovalProblem(MilestonePayState.Submitted, "Clean and on time.", "Keep the commits small."));
+        Assert.Contains("remarks under", MilestonePay.ApprovalProblem(MilestonePayState.Submitted, long_, null));
+        Assert.Contains("advice under", MilestonePay.ApprovalProblem(MilestonePayState.Submitted, null, long_));
+        Assert.Contains("not been handed in", MilestonePay.ApprovalProblem(MilestonePayState.Open, null, null));
+        // Sending back: the note is still required; the advice is not, and is only ever too long.
+        Assert.Null(MilestonePay.ChangesProblem(MilestonePayState.Submitted, "The totals ignore the discount column.", null));
+        Assert.Contains("advice under", MilestonePay.ChangesProblem(MilestonePayState.Submitted, "The totals ignore the discount column.", long_));
+        // Stored trimmed, and blank is nothing.
+        Assert.Null(MilestonePay.Clean("   "));
+        Assert.Equal("Keep going.", MilestonePay.Clean("  Keep going. "));
+        Assert.Equal("approved", MilestonePay.DecisionName(MilestoneReviewDecision.Approved));
+        Assert.Equal("changes_requested", MilestonePay.DecisionName(MilestoneReviewDecision.ChangesRequested));
+    }
+
+    [Fact]
+    public void A_competitive_claim_is_reviewed_while_entries_run_and_in_review_with_the_same_words()
+    {
+        var sentence = "The totals ignore the discount column.";
+        // While entries run and while the client reads them; not once decided.
+        Assert.Null(ClaimReview.Problem(OpportunityStatus.Open, MilestoneReviewDecision.Approved, null, null));
+        Assert.Null(ClaimReview.Problem(OpportunityStatus.Reviewing, MilestoneReviewDecision.ChangesRequested, sentence, "Test on a phone."));
+        Assert.Contains("winner is announced", ClaimReview.Problem(OpportunityStatus.Awarded, MilestoneReviewDecision.Approved, null, null));
+        Assert.Contains("cancelled", ClaimReview.Problem(OpportunityStatus.Cancelled, MilestoneReviewDecision.Approved, null, null));
+        // The words follow the paid-by-milestone rules.
+        Assert.Contains("Say what should change", ClaimReview.Problem(OpportunityStatus.Open, MilestoneReviewDecision.ChangesRequested, "Too thin", null));
+        Assert.Contains("advice under", ClaimReview.Problem(
+            OpportunityStatus.Open, MilestoneReviewDecision.Approved, null, new string('x', MilestoneReview.MaxAdvice + 1)));
+        Assert.Equal(MilestoneReviewDecision.Approved, ClaimReview.ParseDecision("approve"));
+        Assert.Equal(MilestoneReviewDecision.ChangesRequested, ClaimReview.ParseDecision(" Changes "));
+        Assert.Null(ClaimReview.ParseDecision("paid"));
+    }
+
+    [Fact]
+    public void A_competitive_claim_reads_updated_once_work_lands_after_a_request_for_changes()
+    {
+        var asked = DateTimeOffset.Parse("2026-10-08T10:00:00Z");
+        Assert.Equal("unclaimed", ClaimReview.StateName(false, null, null, null));
+        Assert.Equal("unreviewed", ClaimReview.StateName(true, null, null, asked));
+        Assert.Equal("approved", ClaimReview.StateName(true, MilestoneReviewDecision.Approved, asked, asked.AddHours(1)));
+        Assert.Equal("changes_requested", ClaimReview.StateName(true, MilestoneReviewDecision.ChangesRequested, asked, asked.AddHours(-1)));
+        Assert.Equal("changes_requested", ClaimReview.StateName(true, MilestoneReviewDecision.ChangesRequested, asked, null));
+        Assert.Equal("updated", ClaimReview.StateName(true, MilestoneReviewDecision.ChangesRequested, asked, asked.AddMinutes(5)));
+    }
+
+    [Fact]
     public void Marking_paid_approves_a_handed_in_milestone_but_never_one_sent_back()
     {
         Assert.Null(MilestonePay.PayProblem(MilestonePayState.Submitted));

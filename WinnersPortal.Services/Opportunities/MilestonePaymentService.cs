@@ -111,36 +111,69 @@ public sealed class MilestonePaymentService(
         return (null, claim, again);
     }
 
-    // ------------------------------------------------------------- the client
+    // ---------------------------------------------------- the client's review
+    // The two answers to a milestone handed in are the client's, or an
+    // administrator's on their behalf — a client who asked for help, or
+    // one who has gone quiet on a freelancer. Either way the decision is
+    // written down with its remarks and advice, and an administrator's is
+    // reported to the client. Paying stays the client's alone.
 
-    public Task<Outcome<MilestonePaymentResponse>> ApproveAsync(Guid checkpointId, ClaimsPrincipal principal, CancellationToken ct) =>
-        ActAsync(checkpointId, principal, asClient: true, ct, (x, i) =>
+    public Task<Outcome<MilestonePaymentResponse>> ApproveAsync(
+        Guid checkpointId, MilestoneReviewRequest request, ClaimsPrincipal principal, CancellationToken ct) =>
+        ActAsync(checkpointId, principal, Who.ClientOrAdmin, ct, (x, i) =>
         {
-            if (MilestonePay.ApproveProblem(x.Book.States[i]) is { } problem) return problem;
+            if (MilestonePay.ApprovalProblem(x.Book.States[i], request.Note, request.Advice) is { } problem) return problem;
             var claim = x.Book.Claims[i]!;
             claim.ApprovedAtUtc = x.Now;
             var m = x.Book.Milestones[i];
+            var review = Record(x, claim, MilestoneReviewDecision.Approved, request);
             Notify.Queue(db, x.Freelancer, "milestone_approved", Emails.MilestoneApproved(
-                x.Opportunity.Title, x.Opportunity.Slug, i + 1, m.Title, m.Amount, x.Opportunity.Currency));
+                x.Opportunity.Title, x.Opportunity.Slug, i + 1, m.Title, m.Amount, x.Opportunity.Currency,
+                review.Note, review.Advice, x.ByAdmin));
             return null;
         });
 
     public Task<Outcome<MilestonePaymentResponse>> RequestChangesAsync(
-        Guid checkpointId, MilestoneChangesRequest request, ClaimsPrincipal principal, CancellationToken ct) =>
-        ActAsync(checkpointId, principal, asClient: true, ct, (x, i) =>
+        Guid checkpointId, MilestoneReviewRequest request, ClaimsPrincipal principal, CancellationToken ct) =>
+        ActAsync(checkpointId, principal, Who.ClientOrAdmin, ct, (x, i) =>
         {
-            if (MilestonePay.ChangesProblem(x.Book.States[i], request.Note) is { } problem) return problem;
+            if (MilestonePay.ChangesProblem(x.Book.States[i], request.Note, request.Advice) is { } problem) return problem;
             var claim = x.Book.Claims[i]!;
-            var note = request.Note!.Trim();
+            var review = Record(x, claim, MilestoneReviewDecision.ChangesRequested, request);
             claim.ChangesRequestedAtUtc = x.Now;
-            claim.ChangesNote = note;
+            claim.ChangesNote = review.Note;
             Notify.Queue(db, x.Freelancer, "milestone_changes", Emails.MilestoneChangesRequested(
-                x.Opportunity.Title, x.Opportunity.Slug, i + 1, x.Book.Milestones[i].Title, note));
+                x.Opportunity.Title, x.Opportunity.Slug, i + 1, x.Book.Milestones[i].Title, review.Note!, review.Advice, x.ByAdmin));
             return null;
         });
 
+    /// <summary>The decision written down, and — an administrator's — reported to the client.</summary>
+    private MilestoneReview Record(Act x, Checkpoint claim, MilestoneReviewDecision decision, MilestoneReviewRequest request)
+    {
+        var review = new MilestoneReview
+        {
+            Id = Guid.NewGuid(),
+            CheckpointId = claim.Id,
+            Decision = decision,
+            Note = MilestonePay.Clean(request.Note),
+            Advice = MilestonePay.Clean(request.Advice),
+            ByUserId = x.Me,
+            OnBehalf = x.ByAdmin,
+            AtUtc = x.Now,
+        };
+        db.MilestoneReviews.Add(review);
+        if (x.ByAdmin)
+        {
+            var i = x.Book.IndexOf(claim.MilestoneId);
+            Notify.Queue(db, x.Opportunity.Client!, "milestone_reviewed_by_admin", Emails.MilestoneReviewedByAdmin(
+                x.Opportunity.Title, x.Opportunity.Slug, x.Freelancer.DisplayName, i + 1, x.Book.Milestones[i].Title,
+                decision == MilestoneReviewDecision.Approved, review.Note, review.Advice));
+        }
+        return review;
+    }
+
     public Task<Outcome<MilestonePaymentResponse>> MarkPaidAsync(Guid checkpointId, ClaimsPrincipal principal, CancellationToken ct) =>
-        ActAsync(checkpointId, principal, asClient: true, ct, async (x, i) =>
+        ActAsync(checkpointId, principal, Who.Client, ct, async (x, i) =>
         {
             if (MilestonePay.PayProblem(x.Book.States[i]) is { } problem) return problem;
             var claim = x.Book.Claims[i]!;
@@ -204,31 +237,39 @@ public sealed class MilestonePaymentService(
 
     // ---------------------------------------------------------------- shared
 
-    private sealed class Act(Opportunity opportunity, User freelancer, Book book, DateTimeOffset now)
+    /// <summary>Whose action a step is: the client's alone, or the client's or an administrator's on their behalf.</summary>
+    private enum Who { Client, ClientOrAdmin }
+
+    private sealed class Act(Opportunity opportunity, User freelancer, Book book, DateTimeOffset now, Guid me, bool byAdmin)
     {
         public Opportunity Opportunity { get; } = opportunity;
         public User Freelancer { get; } = freelancer;
         public Book Book { get; } = book;
         public DateTimeOffset Now { get; } = now;
+        public Guid Me { get; } = me;
+        /// <summary>An administrator acting over the client, who is told.</summary>
+        public bool ByAdmin { get; } = byAdmin;
         public bool Completed { get; set; }
     }
 
     private Task<Outcome<MilestonePaymentResponse>> ActAsync(
-        Guid checkpointId, ClaimsPrincipal principal, bool asClient, CancellationToken ct, Func<Act, int, string?> step) =>
-        ActAsync(checkpointId, principal, asClient, ct, (x, i) => Task.FromResult(step(x, i)));
+        Guid checkpointId, ClaimsPrincipal principal, Who who, CancellationToken ct, Func<Act, int, string?> step) =>
+        ActAsync(checkpointId, principal, who, ct, (x, i) => Task.FromResult(step(x, i)));
 
     /// <summary>The client's side of one milestone: found, checked, changed, saved, and every open tab told.</summary>
     private async Task<Outcome<MilestonePaymentResponse>> ActAsync(
-        Guid checkpointId, ClaimsPrincipal principal, bool asClient, CancellationToken ct, Func<Act, int, Task<string?>> step)
+        Guid checkpointId, ClaimsPrincipal principal, Who who, CancellationToken ct, Func<Act, int, Task<string?>> step)
     {
         var me = Principal.UserId(principal)!.Value;
         var claim = await db.Checkpoints
-            .Include(cp => cp.Entry).ThenInclude(e => e!.Opportunity)
+            .Include(cp => cp.Entry).ThenInclude(e => e!.Opportunity).ThenInclude(o => o!.Client)
             .Include(cp => cp.Entry).ThenInclude(e => e!.Freelancer)
             .SingleOrDefaultAsync(cp => cp.Id == checkpointId, ct);
         // Not found rather than forbidden: whose milestone it is is not
         // something another client gets to learn.
-        if (claim?.Entry?.Opportunity is not { } opportunity || (asClient && opportunity.ClientId != me)
+        var byAdmin = who == Who.ClientOrAdmin && principal.IsInRole(Roles.Admin)
+            && claim?.Entry?.Opportunity?.ClientId != me;
+        if (claim?.Entry?.Opportunity is not { } opportunity || (opportunity.ClientId != me && !byAdmin)
             || !MilestonePay.ByMilestone(opportunity.Kind) || claim.Entry.Status != EntryStatus.Active)
             return Outcome.NotFound();
         if (opportunity.Status != OpportunityStatus.Awarded)
@@ -238,7 +279,7 @@ public sealed class MilestonePaymentService(
 
         var book = await ReadAsync(db, opportunity.Id, claim.EntryId, ct);
         var i = book.IndexOf(claim.MilestoneId);
-        var act = new Act(opportunity, claim.Entry.Freelancer!, book, DateTimeOffset.UtcNow);
+        var act = new Act(opportunity, claim.Entry.Freelancer!, book, DateTimeOffset.UtcNow, me, byAdmin);
         if (await step(act, i) is { } problem) return Outcome.Conflict(problem);
         await db.SaveChangesAsync(ct);
 
@@ -267,5 +308,10 @@ public sealed class MilestonePaymentService(
     }
 }
 
-/// <summary>The client's request for changes: what to change, in a sentence the freelancer can act on.</summary>
-public sealed record MilestoneChangesRequest(string? Note);
+/// <summary>
+/// A review of a milestone handed in. Sending it back, the note says what
+/// to change, in a sentence the freelancer can act on; approving, it is
+/// optional remarks on what was good. The advice, optional either way, is
+/// for the milestones ahead.
+/// </summary>
+public sealed record MilestoneReviewRequest(string? Note, string? Advice);

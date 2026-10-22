@@ -7,15 +7,21 @@ using WinnersPortal.Services.Ai;
 //
 //   dotnet run --project tests/WinnersPortal.AiEvals -- [options]
 //
-//   --feature <slug>      only this feature's folder (repeatable): categorise, milestones, profile-review, entry-digest
+//   --feature <slug>      only this feature's folder (repeatable): categorise, milestones, brief-coach, requirements,
+//                         criteria, seo, profile-review, profile-summary, work-kinds, project-approach,
+//                         application-evaluation, entry-digest, progress-narrative, standing-notes
 //   --case <name>         only the case with this file name
 //   --matching            the embedding eval instead: evals/matching/ profiles against the categories (no prompt is sent)
-//   --provider <key>      gemini | anthropic | openai        (default: Settings → AI evals, else WP_EVAL_PROVIDER, else gemini)
+//   --provider <key>      gemini | anthropic | openai | ollama (default: Settings → AI evals, else WP_EVAL_PROVIDER, else gemini)
+//   --base-url <url>      with ollama: the server's /v1 address (default: Settings → AI evals, else WP_EVAL_BASE_URL,
+//                         else http://localhost:11434/v1); no key needed unless a gateway in front asks for one
 //   --model <name>        the model                          (default: WP_EVAL_MODEL, else the provider's default; with --matching, its embedding model)
 //   --judge-model <name>  the judge's model, same provider   (default: the model under test)
 //   --no-judge            skip every rubric; cases with one fail and say so
 //   --max-calls <n>       the spend cap, judge calls included (default: Settings → AI evals, else WP_EVAL_MAX_CALLS, else 100)
 //   --dry-run             build every prompt, send nothing, print the sizes
+//   --replay              no key, no call: each case's good answer plays the model through the whole tool,
+//                         and each bad answer must fail as it says; proves the tool and the cases, not the prompts
 //   --compare <report>    after the run, print this run beside an earlier report's JSON
 //   --cases <dir>         the cases folder (default: evals/ at the repository root)
 //   --out <dir>           where reports go (default: evals/reports/)
@@ -41,9 +47,9 @@ using WinnersPortal.Services.Ai;
 // reading until a run says they agree.
 
 var features = new List<string>();
-string? caseName = null, provider = null, model = null, judgeModel = null, compare = null, casesDir = null, outDir = null, keysDir = null;
+string? caseName = null, provider = null, model = null, judgeModel = null, compare = null, casesDir = null, outDir = null, keysDir = null, baseUrl = null;
 int? maxCalls = null;
-bool noJudge = false, dryRun = false, noSettings = false, matching = false;
+bool noJudge = false, dryRun = false, noSettings = false, matching = false, replay = false;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -57,6 +63,7 @@ for (var i = 0; i < args.Length; i++)
         case "--feature": features.Add(Next()); break;
         case "--case": caseName = Next(); break;
         case "--provider": provider = Next(); break;
+        case "--base-url": baseUrl = Next(); break;
         case "--model": model = Next(); break;
         case "--judge-model": judgeModel = Next(); break;
         case "--no-judge": noJudge = true; break;
@@ -68,6 +75,7 @@ for (var i = 0; i < args.Length; i++)
         case "--keys": keysDir = Next(); break;
         case "--no-settings": noSettings = true; break;
         case "--matching": matching = true; break;
+        case "--replay": replay = true; break;
         case "--help" or "-h":
             Console.WriteLine(File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Program.cs"))
                 .TakeWhile(l => l.StartsWith("//")).Select(l => l.TrimStart('/', ' ')).Aggregate((a, b) => a + "\n" + b));
@@ -100,6 +108,27 @@ if (cases.Count == 0 && profiles.Count == 0)
     return 2;
 }
 
+// A replay sends nothing, so it needs no key, no switch and no settings:
+// the cases' good answers play the model, and their bad answers are held
+// to the failures they name.
+if (replay)
+{
+    if (matching)
+    {
+        Console.Error.WriteLine("--replay is for the prompt cases; the matching run has no answers to replay.");
+        return 2;
+    }
+    var played = await new EvalRunner(new ReplayModel(cases), null, cases.Count, dryRun: false, Console.WriteLine, replay: true)
+        .RunAsync(cases, CancellationToken.None);
+    Console.WriteLine();
+    Console.WriteLine(played.ToMarkdown());
+    var wrong = cases.SelectMany(EvalAnswers.Problems).ToList();
+    Console.WriteLine(wrong.Count == 0
+        ? $"Every bad answer ({cases.Sum(c => c.Answers?.Bad.Count ?? 0)}) failed as it says."
+        : "Sample answers that do not hold:\n  " + string.Join("\n  ", wrong));
+    return played.Failed == 0 && wrong.Count == 0 ? 0 : 1;
+}
+
 // Settings → AI evals first: what is saved there wins over the variables.
 EvalSettings.Saved? saved = null;
 var settingsNote = "not read (--no-settings)";
@@ -115,7 +144,7 @@ if (EvalSettings.RunProblem(saved, settingsNote, noSettings, dryRun) is { } stop
     Console.Error.WriteLine(stopped);
     return 2;
 }
-var choice = EvalSettings.Choose(provider, saved, Environment.GetEnvironmentVariable, maxCalls);
+var choice = EvalSettings.Choose(provider, saved, Environment.GetEnvironmentVariable, maxCalls, baseUrl);
 provider = choice.Provider;
 maxCalls = choice.MaxCalls;
 if (AiProviders.Find(provider) is null)
@@ -149,7 +178,7 @@ if (matching)
 if (string.IsNullOrWhiteSpace(model)) model = AiProviderRequests.DefaultModel(provider);
 
 var apiKey = choice.ApiKey;
-if (!dryRun && apiKey is null)
+if (!dryRun && apiKey is null && !choice.Local)
 {
     Console.Error.WriteLine(
         "No eval key. Save one under Settings → AI evals, or set WP_EVAL_API_KEY in this shell; or pass --dry-run. "
@@ -158,10 +187,11 @@ if (!dryRun && apiKey is null)
 }
 
 Console.WriteLine($"{cases.Count} case(s) · {provider}/{model} (provider from {choice.ProviderFrom}"
+    + (choice.BaseUrl is { } at ? $", at {at} from {choice.BaseUrlFrom}" : "")
     + (apiKey is null ? ", no key" : $", key from {choice.ApiKeyFrom}")
     + $") · cap {maxCalls} calls (from {choice.MaxCallsFrom}) · timeout {choice.TimeoutSeconds} s (from {choice.TimeoutFrom}){(dryRun ? " · dry run" : "")}");
-var under = new HttpEvalModel(provider, model, apiKey ?? "", choice.TimeoutSeconds);
-var judge = noJudge ? null : judgeModel is null ? under : new HttpEvalModel(provider, judgeModel, apiKey ?? "", choice.TimeoutSeconds);
+var under = new HttpEvalModel(provider, model, apiKey ?? "", choice.TimeoutSeconds, baseUrl: choice.BaseUrl);
+var judge = noJudge ? null : judgeModel is null ? under : new HttpEvalModel(provider, judgeModel, apiKey ?? "", choice.TimeoutSeconds, baseUrl: choice.BaseUrl);
 var prices = AiPrices.Parse(saved?.ModelPrices);
 if (!dryRun && !noSettings && prices.Find(model) is null)
     Console.WriteLine($"No price is saved for {model} under Settings → AI automation, so the report will count tokens and not dollars.");

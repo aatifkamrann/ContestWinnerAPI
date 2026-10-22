@@ -77,8 +77,12 @@ public static class AiResilience
                 Delay = FirstDelay,
                 UseJitter = true,
                 ShouldRetryAfterHeader = true,
+                // Not a timed-out attempt to a server with one queue
+                // (AiProviderRequests.OneQueue): it may still be running
+                // there, and a retry would wait behind it.
                 ShouldHandle = async args =>
                     Transient(args.Outcome)
+                    && !(args.Outcome.Exception is TimeoutRejectedException && OneQueue(args.Context))
                     && args.AttemptNumber < (await limits(args.Context.CancellationToken)).Retries,
             })
             .AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
@@ -101,6 +105,11 @@ public static class AiResilience
                     TimeSpan.FromSeconds((await limits(args.Context.CancellationToken)).CallTimeoutSeconds),
             });
     }
+
+    /// <summary>Whether the call in hand goes to a server with one shared queue.</summary>
+    public static bool OneQueue(ResilienceContext context) =>
+        context.GetRequestMessage() is { } request
+        && request.Options.TryGetValue(AiProviderRequests.OneQueue, out var oneQueue) && oneQueue;
 
     /// <summary>
     /// A failure the next attempt may not meet: a 429, a 5xx, a 408, an

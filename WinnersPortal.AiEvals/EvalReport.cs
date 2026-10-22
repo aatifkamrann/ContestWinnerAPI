@@ -23,8 +23,13 @@ public sealed record CaseResult(
     /// <summary>Tokens answered, likewise.</summary>
     long OutputTokens = 0,
     /// <summary>What the case cost at the saved prices; null while the model, or the judge's, has none.</summary>
-    decimal? CostUsd = null)
+    decimal? CostUsd = null,
+    /// <summary>What the gate repaired on the way to the answer scored (<see cref="EvalRepairs"/>); a pass with any is a slip the model made.</summary>
+    IReadOnlyList<string>? Repairs = null)
 {
+    /// <summary>Whether the gate had to repair the model's answer.</summary>
+    public bool Repaired => Repairs is { Count: > 0 };
+
     public string Id => $"{Feature}/{Name}";
 
     public AiTokens Tokens => new(InputTokens, OutputTokens);
@@ -45,13 +50,18 @@ public sealed record EvalReport(
     int MaxCalls,
     bool CapReached,
     bool DryRun,
-    IReadOnlyList<CaseResult> Cases)
+    IReadOnlyList<CaseResult> Cases,
+    /// <summary>The cases' own good answers stood in for the model: the tool proved, not the prompts.</summary>
+    bool Replay = false)
 {
     public int Passed => Cases.Count(c => c.Ran && c.Pass);
 
     public int Failed => Cases.Count(c => c.Ran && !c.Pass);
 
     public int NotRun => Cases.Count(c => !c.Ran);
+
+    /// <summary>Passes that passed only because the gate repaired the answer first.</summary>
+    public int PassedRepaired => Cases.Count(c => c.Ran && c.Pass && c.Repaired);
 
     /// <summary>Every token the run spent, judge calls included.</summary>
     public AiTokens Tokens => Cases.Aggregate(AiTokens.None, (sum, c) => sum + c.Tokens);
@@ -88,6 +98,7 @@ public sealed record EvalReport(
             .Append(" · ").Append(RunAtUtc.ToString("yyyy-MM-dd HH:mm")).AppendLine(" UTC");
         md.AppendLine();
         if (DryRun) md.AppendLine("**Dry run** — the prompts were built and nothing was sent.").AppendLine();
+        if (Replay) md.AppendLine("**Replay** — each case's good answer stood in for the model: nothing was sent and no rubric was read.").AppendLine();
         md.Append("Prompt versions: ")
             .AppendLine(string.Join(", ", PromptVersions.OrderBy(p => p.Key).Select(p => $"{p.Key} v{p.Value}")));
         md.Append("Judge: ").AppendLine(JudgeModel ?? "none");
@@ -99,9 +110,12 @@ public sealed record EvalReport(
         md.Append("**").Append(Passed).Append(" passed, ").Append(Failed).Append(" failed");
         if (NotRun > 0) md.Append(", ").Append(NotRun).Append(" not run");
         md.AppendLine("**").AppendLine();
+        if (PassedRepaired > 0)
+            md.Append(PassedRepaired).Append(PassedRepaired == 1 ? " pass" : " passes")
+                .AppendLine(" only after the gate repaired the answer — the person got a good answer, the model made a slip (see below).").AppendLine();
 
-        md.AppendLine("| Feature | Passed | Failed | Not run | Median ms | Tokens in / out | Cost |");
-        md.AppendLine("|---|---:|---:|---:|---:|---:|---:|");
+        md.AppendLine("| Feature | Passed | Gate repaired | Failed | Not run | Median ms | Tokens in / out | Cost |");
+        md.AppendLine("|---|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var g in Cases.GroupBy(c => c.Feature).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
             var ran = g.Where(c => c.Ran && c.LatencyMs > 0).Select(c => c.LatencyMs).OrderBy(x => x).ToList();
@@ -110,6 +124,7 @@ public sealed record EvalReport(
             var cost = g.Any(c => c.Ran && c.CostUsd is null) ? "–" : AiPrices.Dollars(g.Sum(c => c.CostUsd ?? 0m));
             md.Append("| ").Append(g.Key)
                 .Append(" | ").Append(g.Count(c => c.Ran && c.Pass))
+                .Append(" | ").Append(g.Count(c => c.Ran && c.Repaired))
                 .Append(" | ").Append(g.Count(c => c.Ran && !c.Pass))
                 .Append(" | ").Append(g.Count(c => !c.Ran))
                 .Append(" | ").Append(median)
@@ -127,10 +142,20 @@ public sealed record EvalReport(
                 if (c.Error is not null) md.Append("- ").AppendLine(c.Error);
                 foreach (var f in c.Failures) md.Append("- ").AppendLine(f);
                 if (c.Judge is { Pass: false } j) md.Append("- judge: ").AppendLine(j.Reason);
+                foreach (var r in c.Repairs ?? []) md.Append("- repaired: ").AppendLine(r);
                 if (c.Output is not null)
                     md.AppendLine().AppendLine("```json").AppendLine(Indent(c.Output)).AppendLine("```");
                 md.AppendLine();
             }
+        }
+
+        var repaired = Cases.Where(c => c.Ran && c.Pass && c.Repaired).ToList();
+        if (repaired.Count > 0)
+        {
+            md.AppendLine().AppendLine("## Passed after the gate repaired them").AppendLine();
+            md.AppendLine("What a person reads passed every check; what the model wrote did not, until the gate cut, dropped or rescaled it.").AppendLine();
+            foreach (var c in repaired)
+                md.Append("- ").Append(c.Id).Append(": ").AppendLine(string.Join("; ", c.Repairs!));
         }
 
         var judged = Cases.Where(c => c.Ran && c.Judge is not null).ToList();
@@ -153,7 +178,7 @@ public sealed record EvalReport(
         string Head(EvalReport r) => $"{r.Provider}/{r.Model}" + (r.PromptVersions.Count > 0
             ? " (" + string.Join(", ", r.PromptVersions.OrderBy(p => p.Key).Select(p => $"{p.Key} v{p.Value}")) + ")"
             : "");
-        static string Mark(CaseResult? c) => c is null ? "–" : !c.Ran ? "not run" : c.Pass ? "pass" : "**fail**";
+        static string Mark(CaseResult? c) => c is null ? "–" : !c.Ran ? "not run" : c.Pass ? (c.Repaired ? "pass (gate repaired)" : "pass") : "**fail**";
 
         var md = new StringBuilder();
         md.AppendLine("# AI eval · side by side").AppendLine();

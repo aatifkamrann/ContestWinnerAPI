@@ -762,7 +762,8 @@ public class ProfileTests
         // The chips under the skills list are this, filtered in the browser
         // against what is already typed. "Something else" is the one kind
         // with nothing to offer, for the same reason it cannot be judged.
-        foreach (var category in OpportunityCategories.All)
+        // The shipped list: an edited one may leave a kind's list empty.
+        foreach (var category in DefaultCategories.All)
         {
             if (OpportunityCategories.Judgeable(category))
                 Assert.NotEmpty(category.Skills);

@@ -219,7 +219,7 @@ public static class EvalMatching
             Console.WriteLine("Nothing was sent.");
             return 0;
         }
-        if (choice.ApiKey is null)
+        if (choice.ApiKey is null && !choice.Local)
         {
             Console.Error.WriteLine(
                 "No eval key. Save one under Settings → AI evals, or set WP_EVAL_API_KEY in this shell; or pass --dry-run. "
@@ -234,7 +234,7 @@ public static class EvalMatching
         if (prices.Find(model) is null)
             Console.WriteLine($"No price is saved for {model} under Settings → AI automation, so the report will count tokens and not dollars.");
 
-        var embedder = new HttpEvalEmbedder(provider, model, choice.ApiKey, choice.TimeoutSeconds);
+        var embedder = new HttpEvalEmbedder(provider, model, choice.ApiKey ?? "", choice.TimeoutSeconds, baseUrl: choice.BaseUrl);
         var calls = 0;
         var tokens = AiTokens.None;
         var counted = true;

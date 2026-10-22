@@ -131,11 +131,13 @@ public static class Standing
 
         if (f.UsesRepository && f.Repo is { } r)
         {
+            // Present items keep their article ("tests and a README"); missing
+            // ones follow "no" bare and join with "or" ("no README or CI").
             var has = new List<string>();
             var missing = new List<string>();
-            (r.HasTests ? has : missing).Add("tests");
-            (r.HasReadme ? has : missing).Add("a README");
-            (r.HasCi ? has : missing).Add("CI");
+            if (r.HasTests) has.Add("tests"); else missing.Add("tests");
+            if (r.HasReadme) has.Add("a README"); else missing.Add("README");
+            if (r.HasCi) has.Add("CI"); else missing.Add("CI");
             var earned = (r.HasTests ? 4 : 0) + (r.HasReadme ? 3 : 0) + (r.HasCi ? 2 : 0) + (r.FileCount >= 5 ? 1 : 0);
             var files = $"{r.FileCount} file{Plural(r.FileCount)}";
             parts.Add(new("quality", "Code & docs", earned, QualityMax,
@@ -143,7 +145,7 @@ public static class Standing
                     ? $"Repository read: no tests, no README, no CI — {files}."
                     : missing.Count == 0
                         ? $"Repository read: {Join(has)} — {files}."
-                        : $"Repository read: {Join(has)}; no {Join(missing)} — {files}."));
+                        : $"Repository read: {Join(has)}; no {Join(missing, "or")} — {files}."));
         }
         else if (f.UsesUpload)
         {
@@ -337,11 +339,11 @@ public static class Standing
     private static string Days(double days) =>
         days < 1 ? "less than a day" : $"{(int)Math.Floor(days)} day{Plural((int)Math.Floor(days))}";
 
-    private static string Join(IReadOnlyList<string> items) => items.Count switch
+    private static string Join(IReadOnlyList<string> items, string conjunction = "and") => items.Count switch
     {
         0 => "",
         1 => items[0],
-        2 => $"{items[0]} and {items[1]}",
-        _ => string.Join(", ", items.Take(items.Count - 1)) + " and " + items[^1],
+        2 => $"{items[0]} {conjunction} {items[1]}",
+        _ => string.Join(", ", items.Take(items.Count - 1)) + $" {conjunction} " + items[^1],
     };
 }

@@ -124,7 +124,7 @@ public class SettingsRegistryTests
     public void The_eval_pair_is_its_own_group_named_as_the_tool_names_it()
     {
         var eval = SettingsRegistry.All.Where(s => s.Group == EvalSettings.Group).Select(s => s.Key).ToList();
-        Assert.Equal([EvalSettings.EnabledKey, EvalSettings.ProviderKey, EvalSettings.ApiKeyKey, EvalSettings.MaxCallsKey, EvalSettings.TimeoutKey], eval);
+        Assert.Equal([EvalSettings.EnabledKey, EvalSettings.ProviderKey, EvalSettings.BaseUrlKey, EvalSettings.ApiKeyKey, EvalSettings.MaxCallsKey, EvalSettings.TimeoutKey], eval);
         Assert.Equal(EvalSettings.ProviderEnv, SettingsRegistry.EnvVarName(EvalSettings.ProviderKey));
         Assert.True(SettingsRegistry.Find(EvalSettings.ApiKeyKey)!.IsSecret);
     }

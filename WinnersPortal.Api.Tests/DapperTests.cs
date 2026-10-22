@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using WinnersPortal.Infrastructure.Data;
 using WinnersPortal.Domain;
 using WinnersPortal.Services.Activity;
@@ -199,6 +200,69 @@ public class DapperTests
     }
 
     /// <summary>
+    /// SQL Server cuts a value to its parameter's declared width without a
+    /// word, so a parameter narrower than the column it is written to or
+    /// compared with loses text (SetupTest_Record kept 240 characters of a
+    /// 1000-character detail). Every text parameter, and every text column
+    /// an OPENJSON row declares, is held to the widest column of that name
+    /// in the tables its script names.
+    /// </summary>
+    [Fact]
+    public void No_text_parameter_is_narrower_than_the_column_it_meets()
+    {
+        using var db = SqlServer();
+        var model = db.Model.GetRelationalModel();
+        static int Width(string type) =>
+            Regex.Match(type, @"varchar\((\d+|max)\)", RegexOptions.IgnoreCase) is { Success: true } m
+                ? m.Groups[1].Value.Equals("max", StringComparison.OrdinalIgnoreCase) ? int.MaxValue : int.Parse(m.Groups[1].Value)
+                : 0;
+
+        var checks = 0;
+        foreach (var (name, script) in Scripts())
+        {
+            var tables = Regex.Matches(script, @"(?:FROM|JOIN|UPDATE|INTO)\s+\[(\w+)\]", RegexOptions.IgnoreCase)
+                .Select(m => model.FindTable(m.Groups[1].Value, null)).OfType<ITable>().Distinct().ToList();
+            int ColumnWidth(string column) =>
+                tables.Select(t => t.FindColumn(column)?.StoreType).OfType<string>().Select(Width).DefaultIfEmpty(0).Max();
+
+            var header = Header.Match(script).Groups["parameters"].Value;
+            var parameters = Regex.Matches(header, @"@(\w+)\s+(n?varchar\((?:\d+|max)\))", RegexOptions.IgnoreCase)
+                .ToDictionary(m => m.Groups[1].Value, m => Width(m.Groups[2].Value), StringComparer.Ordinal);
+
+            var meetings = new List<(string Column, string Parameter)>();
+            foreach (Match m in Regex.Matches(script, @"\[(\w+)\]\s*=\s*\(?@(\w+)|@(\w+)\s*=\s*(?:\[\w+\]\.)?\[(\w+)\]"))
+                meetings.Add(m.Groups[1].Success ? (m.Groups[1].Value, m.Groups[2].Value) : (m.Groups[4].Value, m.Groups[3].Value));
+            foreach (Match m in Regex.Matches(script, @"INSERT INTO \[\w+\]\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)", RegexOptions.IgnoreCase))
+            {
+                var columns = m.Groups[1].Value.Split(',').Select(c => c.Trim().Trim('[', ']')).ToList();
+                var values = m.Groups[2].Value.Split(',').Select(v => v.Trim()).ToList();
+                for (var i = 0; i < Math.Min(columns.Count, values.Count); i++)
+                    if (values[i].StartsWith('@')) meetings.Add((columns[i], values[i][1..]));
+            }
+
+            foreach (var (column, parameter) in meetings.Distinct())
+            {
+                if (!parameters.TryGetValue(parameter, out var declared)) continue;
+                var needed = ColumnWidth(column);
+                if (needed == 0) continue;
+                checks++;
+                Assert.True(declared >= needed, $"{name}: @{parameter} holds {declared} characters and [{column}] {needed}");
+            }
+
+            // An OPENJSON row's text columns, inserted by name.
+            foreach (Match m in Regex.Matches(script, @"\[(\w+)\]\s+(n?varchar\((?:\d+|max)\))\s+'\$", RegexOptions.IgnoreCase))
+            {
+                var needed = ColumnWidth(m.Groups[1].Value);
+                if (needed == 0) continue;
+                checks++;
+                Assert.True(Width(m.Groups[2].Value) >= needed,
+                    $"{name}: the OPENJSON [{m.Groups[1].Value}] holds {Width(m.Groups[2].Value)} characters and the column {needed}");
+            }
+        }
+        Assert.True(checks >= 30, $"only {checks} parameters were matched to a column; the patterns stopped finding them");
+    }
+
+    /// <summary>
     /// A procedure whose first statement writes is a write, and its caller
     /// learns how many rows it touched from the count SQL Server sends —
     /// so it must not say NOCOUNT. Every other one reads, and says it.
@@ -246,21 +310,19 @@ public class DapperTests
     // ------------------------------------------ the LINQ beside them
 
     /// <summary>
-    /// A read's LINQ body against Postgres with nothing listening: EF Core
-    /// translates the query before it opens the connection, so an
-    /// untranslatable shape fails saying so, and a translatable one fails
-    /// on the refused connection. This is the check that the LINQ still
-    /// serves Postgres after it was reshaped to fill the same rows as the
-    /// procedure.
+    /// A read's LINQ body against a Postgres that answers every query with
+    /// no rows (<see cref="EmptyPostgres"/>): EF Core translates and renders
+    /// each query in turn, so the read must run to its end. An
+    /// untranslatable shape anywhere in it fails saying so. This is the
+    /// check that the LINQ still serves Postgres after it was reshaped to
+    /// fill the same rows as the procedure.
     /// </summary>
     private static async Task TranslatesOnPostgres(Func<AppDbContext, Task> read)
     {
-        using var db = new AppDbContext(AppDbContextOptions.Build(
-            DatabaseProvider.Postgres, "Host=127.0.0.1;Port=1;Database=none;Username=x;Password=x;Timeout=1"));
-        var e = await Record.ExceptionAsync(() => read(db));
-        Assert.NotNull(e);
-        Assert.False(e.Message.Contains("could not be translated"), "did not translate: " + e.Message);
-    }
+        using var postgres = new EmptyPostgres();
+        var e = await Record.ExceptionAsync(() => read(postgres.Db));
+        Assert.True(e is null, $"stopped after {postgres.Commands.Count} queries: {e}");
+        Assert.NotEmpty(postgres.Commands);    }
 
     public static IEnumerable<object[]> LinqReads()
     {
@@ -277,6 +339,7 @@ public class DapperTests
             db => MeritReader.RecordLinqAsync(db, id, now, ct),
             db => MeritReader.MeritReadsLinqAsync(db, ids, now, ct),
             db => StandingReader.ReadLinqAsync(db, ids, ct),
+            db => StandingReader.PeopleLinqAsync(db, ids, ids, ct),
             db => Welcome.AccountLinqAsync(db, id, ct),
             db => Welcome.ProfileLinqAsync(db, id, ct),
             db => Welcome.FreelancersLinqAsync(db, ct),
@@ -294,6 +357,8 @@ public class DapperTests
             db => ReportService.ApplicationOutcomesLinqAsync(db, ids, ct),
             db => ReportService.EntryFactsLinqAsync(db, ids, ids, ct),
             db => SetupUsage.FileCountsLinqAsync(db, ct),
+            db => CategoryCatalog.ListLinqAsync(db, ct),
+            db => CategoryAdminService.UsageLinqAsync(db, ct),
             db => AdminService.OperationsLinqAsync(db, ct),
             db => OpportunityCards.FeedLinqAsync(db, Feed(), ct),
             db => OpportunityCards.FeedLinqAsync(db, Feed() with { OpenOnly = false, Q = "inventory", CategoryKey = "software", SubcategoryKey = "web" }, ct),
@@ -329,6 +394,23 @@ public class DapperTests
     {
         _ = index;
         return TranslatesOnPostgres(read);
+    }
+
+    [Fact]
+    public async Task The_translation_check_reaches_a_reads_later_queries()
+    {
+        // The shape that first sent Category_Usage's twin to a 500: EF Core
+        // cannot flatten the text[] column. Behind a query that translates,
+        // a refused connection never got this far.
+        using var postgres = new EmptyPostgres();
+        var e = await Record.ExceptionAsync(async () =>
+        {
+            await postgres.Db.Opportunities.CountAsync();
+            await postgres.Db.Profiles.SelectMany(p => p.SecondaryCategories).GroupBy(k => k)
+                .Select(g => new { g.Key, Count = g.Count() }).ToListAsync();
+        });
+        Assert.Contains("could not be translated", e?.Message);
+        Assert.Single(postgres.Commands);
     }
 
     // --------------------------------------- the feed's parameters

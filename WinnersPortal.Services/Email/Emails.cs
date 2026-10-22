@@ -589,10 +589,14 @@ public static class Emails
                       + "request from a branch named m1-…) and the board updates within seconds.");
         if (repo && upload) sb.Append(' ');
         if (upload)
-            sb.Append("Hand your work in as files on the opportunity page — nobody else entering sees them, "
-                      + "and the client sees them when the deadline passes. Tag an upload with a "
-                      + "milestone to claim it.");
+            sb.Append("Hand your work in as files on the opportunity page — nobody else entering sees them. "
+                      + "Tag an upload with a milestone to claim it: the files tagged with a milestone you have "
+                      + "claimed open to the client then, so they can review it, and the rest when the deadline "
+                      + "passes.");
         if (repo || upload) sb.Append("\n\n");
+        sb.Append("The client may review each milestone you claim — approve it, or ask for changes, with "
+                  + "advice for the milestones ahead. Only you see their words, and a review decides nothing "
+                  + "on its own: the winner is picked after the deadline.\n\n");
 
         if (milestones.Count > 0)
         {
@@ -686,10 +690,12 @@ public static class Emails
 
     /// <summary>To the freelancer: the milestone is accepted, and its payment is due.</summary>
     public static EmailContent MilestoneApproved(
-        string opportunityTitle, string slug, int number, string milestoneTitle, decimal? amount, string currency) => new(
+        string opportunityTitle, string slug, int number, string milestoneTitle, decimal? amount, string currency,
+        string? note = null, string? advice = null, bool byAdmin = false) => new(
         Subject: $"Milestone {number} on “{opportunityTitle}” is approved",
         TextBody:
-            $"The client approved milestone {number}, “{milestoneTitle}”.\n\n"
+            $"{Reviewer(byAdmin)} approved milestone {number}, “{milestoneTitle}”.\n\n"
+            + ReviewWords(note, advice)
             + "Its payment"
             + (amount is { } a ? $" of {Money(a, currency)}" : "")
             + " is due now. You will hear again when the client marks it paid, and the next milestone opens "
@@ -699,16 +705,98 @@ public static class Emails
 
     /// <summary>To the freelancer: what the client wants changed, in the client's words.</summary>
     public static EmailContent MilestoneChangesRequested(
-        string opportunityTitle, string slug, int number, string milestoneTitle, string note) => new(
+        string opportunityTitle, string slug, int number, string milestoneTitle, string note,
+        string? advice = null, bool byAdmin = false) => new(
         Subject: $"Changes asked for on milestone {number} of “{opportunityTitle}”",
         TextBody:
-            $"The client asked for changes to milestone {number}, “{milestoneTitle}”, before approving it:\n\n"
+            $"{Reviewer(byAdmin)} asked for changes to milestone {number}, “{milestoneTitle}”, before approving it:\n\n"
             + $"“{note}”\n\n"
+            + (advice is not null ? $"Advice for the milestones ahead:\n\n“{advice}”\n\n" : "")
             + "Make the changes, then hand the milestone in again: push a new tag or pull request for it, upload "
             + "the corrected file tagged with it, or choose Hand in again on the opportunity page. Its payment "
             + "follows the approval.",
         ActionText: "See the request",
         ActionPath: $"/opportunities/{slug}");
+
+    /// <summary>To the client: an administrator reviewed a milestone on their behalf, and what they said.</summary>
+    public static EmailContent MilestoneReviewedByAdmin(
+        string opportunityTitle, string slug, string freelancerName, int number, string milestoneTitle,
+        bool approved, string? note, string? advice) => new(
+        Subject: approved
+            ? $"An administrator approved milestone {number} on “{opportunityTitle}”"
+            : $"An administrator asked for changes to milestone {number} on “{opportunityTitle}”",
+        TextBody:
+            $"A portal administrator reviewed milestone {number}, “{milestoneTitle}”, which {freelancerName} "
+            + $"handed in on “{opportunityTitle}”, and "
+            + (approved
+                ? "approved it: its payment is due from you now, and marking it paid is still yours to do."
+                : $"sent it back for changes; {freelancerName} hands it in again when they are done.")
+            + "\n\n" + ReviewWords(note, advice)
+            + $"{freelancerName} has been told. The decision shows on the Progress board as the administrator’s.",
+        ActionText: "See the milestones",
+        ActionPath: $"/opportunities/{slug}");
+
+    /// <summary>
+    /// To an entrant on a competitive opportunity: the client reviewed a
+    /// milestone they claimed. Feedback, not a verdict on the opportunity —
+    /// the email says so, and, while there is time, how to act on a request.
+    /// </summary>
+    public static EmailContent ClaimReviewed(
+        string opportunityTitle, string slug, OpportunityDelivery delivery, int number, string milestoneTitle,
+        bool approved, string? note, string? advice, bool byAdmin, bool deadlinePassed)
+    {
+        var repo = delivery.HasFlag(OpportunityDelivery.Repository);
+        var upload = delivery.HasFlag(OpportunityDelivery.Upload);
+        var how = string.Join(", or ", new[]
+        {
+            repo ? "push the changes to your repository" : null,
+            upload ? $"upload the corrected file tagged with milestone {number}" : null,
+        }.Where(s => s is not null));
+        return new(
+            Subject: approved
+                ? $"Milestone {number} on “{opportunityTitle}” is approved"
+                : $"Changes asked for on milestone {number} of “{opportunityTitle}”",
+            TextBody:
+                (approved
+                    ? $"{Reviewer(byAdmin)} approved milestone {number}, “{milestoneTitle}”: it meets the brief so far.\n\n"
+                      + ReviewWords(note, advice)
+                    : $"{Reviewer(byAdmin)} asked for changes to milestone {number}, “{milestoneTitle}”:\n\n"
+                      + $"“{note}”\n\n"
+                      + (advice is not null ? $"Advice for the milestones ahead:\n\n“{advice}”\n\n" : "")
+                      + (deadlinePassed
+                          ? "The deadline has passed, so the work stands as it was handed in; take this into the "
+                            + "milestones and opportunities ahead.\n\n"
+                          : $"There is time before the deadline: {how}. The board shows the client the update, "
+                            + "and they can review it again.\n\n"))
+                + "Only you see this review, and it decides nothing on its own: the client picks the winner "
+                + "after the deadline, from the work as a whole.",
+            ActionText: "See your milestones",
+            ActionPath: $"/opportunities/{slug}");
+    }
+
+    /// <summary>To the client: an administrator reviewed an entrant's claimed milestone on their behalf.</summary>
+    public static EmailContent ClaimReviewedByAdmin(
+        string opportunityTitle, string slug, string freelancerName, int number, string milestoneTitle,
+        bool approved, string? note, string? advice) => new(
+        Subject: approved
+            ? $"An administrator approved {freelancerName}’s milestone {number} on “{opportunityTitle}”"
+            : $"An administrator asked {freelancerName} for changes to milestone {number} on “{opportunityTitle}”",
+        TextBody:
+            $"A portal administrator reviewed milestone {number}, “{milestoneTitle}”, which {freelancerName} "
+            + $"claimed on “{opportunityTitle}”, and "
+            + (approved ? "approved it." : "asked for changes.")
+            + "\n\n" + ReviewWords(note, advice)
+            + $"{freelancerName} has been told. The review shows on the Progress board as the administrator’s; "
+            + "it decides nothing about the winner, which stays yours to pick.",
+        ActionText: "See the board",
+        ActionPath: $"/opportunities/{slug}");
+
+    private static string Reviewer(bool byAdmin) => byAdmin ? "A portal administrator, for the client," : "The client";
+
+    /// <summary>The remarks and the advice as paragraphs, each only where there is one.</summary>
+    private static string ReviewWords(string? note, string? advice) =>
+        (note is not null ? $"Their remarks:\n\n“{note}”\n\n" : "")
+        + (advice is not null ? $"Advice for the milestones ahead:\n\n“{advice}”\n\n" : "");
 
     /// <summary>To the freelancer: a milestone is paid, and — unless it was the last — the next one is open.</summary>
     public static EmailContent MilestonePaid(

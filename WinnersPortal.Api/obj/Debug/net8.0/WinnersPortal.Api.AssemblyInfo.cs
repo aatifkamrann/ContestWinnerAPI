@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WinnersPortal.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+19bf7e4080945a7598bf3665d18f62e492a80acb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+39d873bc38055c1fa16e3806e789e44255356d63")]
 [assembly: System.Reflection.AssemblyProductAttribute("WinnersPortal.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WinnersPortal.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

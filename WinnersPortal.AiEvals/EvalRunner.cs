@@ -10,7 +10,8 @@ namespace WinnersPortal.AiEvals;
 /// the cap: a runaway loop cannot spend more than a person said.
 /// </summary>
 /// <param name="prices">The saved model prices, for the cost column; <see cref="AiPriceList.Empty"/> leaves it blank.</param>
-public sealed class EvalRunner(IEvalModel model, IEvalModel? judge, int maxCalls, bool dryRun, Action<string>? log = null, AiPriceList? prices = null)
+/// <param name="replay">The model is <see cref="ReplayModel"/>: rubrics are left unread rather than failed, since only a real judge can read one.</param>
+public sealed class EvalRunner(IEvalModel model, IEvalModel? judge, int maxCalls, bool dryRun, Action<string>? log = null, AiPriceList? prices = null, bool replay = false)
 {
     private readonly AiPriceList prices = prices ?? AiPriceList.Empty;
     private int calls;
@@ -42,7 +43,7 @@ public sealed class EvalRunner(IEvalModel model, IEvalModel? judge, int maxCalls
             DateTimeOffset.UtcNow, model.Provider, model.Model,
             judge is null ? null : $"{judge.Provider}/{judge.Model}",
             cases.Select(c => c.Slug).Distinct().ToDictionary(s => s, s => AiPrompts.Version(EvalFeatures.Parse(s)!.Value)),
-            calls, maxCalls, capReached, dryRun, results);
+            calls, maxCalls, capReached, dryRun, results, replay);
     }
 
     private async Task<CaseResult> RunOneAsync(EvalCase c, CancellationToken ct)
@@ -77,9 +78,10 @@ public sealed class EvalRunner(IEvalModel model, IEvalModel? judge, int maxCalls
         var tokens = spent ?? AiTokens.None;
         var cost = prices.Cost(model.Model, tokens);
         var (canonical, failures) = EvalChecks.Run(c, text);
+        var repairs = canonical is null ? [] : EvalRepairs.Find(c.Feature, text, canonical);
         var all = failures.ToList();
         JudgeResult? verdict = null;
-        if (c.Expect.Judge is { } rubric && canonical is not null)
+        if (c.Expect.Judge is { } rubric && canonical is not null && !replay)
         {
             if (judge is null)
                 all.Add("judge: the case has a rubric and the run has no judge (--no-judge)");
@@ -105,9 +107,14 @@ public sealed class EvalRunner(IEvalModel model, IEvalModel? judge, int maxCalls
         }
 
         var pass = all.Count == 0 && verdict is not { Pass: false };
-        log?.Invoke($"{c.Id}: {(pass ? "pass" : "FAIL")} · {latency:N0} ms"
+        log?.Invoke($"{c.Id}: {(pass ? repairs.Count > 0 ? "pass (gate repaired)" : "pass" : "FAIL")} · {latency:N0} ms"
             + (all.Count > 0 ? " · " + string.Join("; ", all) : "")
-            + (verdict is { Pass: false } v ? " · judge: " + v.Reason : ""));
-        return new CaseResult(c.Slug, c.Name, true, pass, all, verdict, canonical ?? text, latency, null, tokens.Input, tokens.Output, cost);
+            + (verdict is { Pass: false } v ? " · judge: " + v.Reason : "")
+            + (repairs.Count > 0 ? " · repaired: " + string.Join("; ", repairs) : ""));
+        // The model's own words under every failure and every repair, so the
+        // report shows what it wrote and not only what the gate made of it.
+        var output = canonical is null || all.Count > 0 || verdict is { Pass: false } || repairs.Count > 0 ? text : canonical;
+        return new CaseResult(c.Slug, c.Name, true, pass, all, verdict, output, latency, null, tokens.Input, tokens.Output, cost,
+            repairs.Count > 0 ? repairs : null);
     }
 }

@@ -1,3 +1,4 @@
+using WinnersPortal.Services.Ai;
 using WinnersPortal.Services.Email;
 using WinnersPortal.Services.Phone;
 using WinnersPortal.Services.Preview;
@@ -78,11 +79,14 @@ public static partial class Setups
     ]);
 
     /// <summary>
-    /// The provider, key and model, and whether the setup stands by for the
-    /// active one (<see cref="AiOptions.StandbyKey"/>): the switches, the
-    /// ceiling and the features govern every provider at once.
+    /// The provider, a local server's address, key and model, and whether the
+    /// setup stands by for the active one (<see cref="AiOptions.StandbyKey"/>):
+    /// the switches, the ceiling and the features govern every provider at once.
+    /// The screen shows the address only for a local server (AiProviders.Local).
     /// </summary>
-    public static readonly SetupKind Ai = new("ai", "setups.ai", ["ai.provider", "ai.apiKey", "ai.model", AiOptions.StandbyKey],
+    public static readonly SetupKind Ai = new("ai", "setups.ai",
+        ["ai.provider", AiProviders.BaseUrlKey, "ai.apiKey", "ai.model", AiOptions.StandbyKey],
+        Later: [AiProviders.BaseUrlKey],
         Unproved: [AiOptions.StandbyKey]);
 
     /// <summary>

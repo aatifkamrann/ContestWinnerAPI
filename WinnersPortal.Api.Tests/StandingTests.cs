@@ -224,7 +224,7 @@ public class StandingTests
             Repo = new Standing.RepoFacts(FileCount: 3, HasTests: false, HasReadme: true, HasCi: false),
         }).Single(p => p.Key == "quality");
         Assert.Equal(3, repo.Earned);
-        Assert.Contains("no tests and CI", repo.Detail);
+        Assert.Equal("Repository read: a README; no tests or CI — 3 files.", repo.Detail);
 
         var upload = Full() with { UsesRepository = false, UsesUpload = true, Repo = null };
         Assert.Equal(0, Standing.Parts(upload).Single(p => p.Key == "quality").Earned);
@@ -237,6 +237,22 @@ public class StandingTests
         // Both channels, repository unread: the files are the reading.
         var both = Full() with { UsesUpload = true, Repo = null, FilesUploaded = 2 };
         Assert.Equal(5, Standing.Parts(both).Single(p => p.Key == "quality").Earned);
+    }
+
+    [Fact]
+    public void A_missing_README_reads_as_no_README_and_a_present_one_keeps_its_article()
+    {
+        string Detail(bool tests, bool readme, bool ci) => Standing.Parts(Full() with
+        {
+            Repo = new Standing.RepoFacts(FileCount: 15, HasTests: tests, HasReadme: readme, HasCi: ci),
+        }).Single(p => p.Key == "quality").Detail;
+
+        Assert.Equal("Repository read: tests; no README or CI — 15 files.", Detail(true, false, false));
+        Assert.Equal("Repository read: tests and CI; no README — 15 files.", Detail(true, false, true));
+        Assert.Equal("Repository read: tests and a README; no CI — 15 files.", Detail(true, true, false));
+        Assert.Equal("Repository read: tests, a README and CI — 15 files.", Detail(true, true, true));
+        Assert.Equal("Repository read: no tests, no README, no CI — 15 files.", Detail(false, false, false));
+        Assert.DoesNotContain("no a README", Detail(false, false, true));
     }
 
     [Fact]

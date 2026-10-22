@@ -127,6 +127,10 @@ public sealed class ProfileService(AppDbContext db, GitHubService github, Paymen
             .Include(p => p.Projects)
             .Include(p => p.Payments)
             .SingleOrDefaultAsync(p => p.UserId == id, ct);
+        // What it held before this save: a category retired since may stay
+        // where it already was, and nowhere new.
+        List<string?> heldCategories = profile is null ? [] :
+            [profile.PrimaryCategory, .. profile.SecondaryCategories, .. profile.Projects.Select(p => p.Category)];
         if (profile is null)
         {
             // Created on first save, not at registration: an account with
@@ -243,7 +247,7 @@ public sealed class ProfileService(AppDbContext db, GitHubService github, Paymen
         // dropped rather than refused: a category the registry retires
         // must not make somebody's profile unsaveable.
         var (primaryCategory, secondaryCategories) =
-            ProfileRules.CleanCategories(request.PrimaryCategory, request.SecondaryCategories);
+            ProfileRules.CleanCategories(request.PrimaryCategory, request.SecondaryCategories, heldCategories);
         profile.PrimaryCategory = primaryCategory;
         profile.SecondaryCategories = secondaryCategories;
         profile.PrimaryWorkType = ProfileRules.ParseWorkType(request.WorkType);
@@ -297,7 +301,7 @@ public sealed class ProfileService(AppDbContext db, GitHubService github, Paymen
                 // The same taxonomy the member's own kinds of work come
                 // from, cleaned the same way: a key it no longer knows
                 // leaves the field empty rather than the form unsaveable.
-                Category = ProfileRules.CleanCategory(p.Category),
+                Category = ProfileRules.CleanCategory(p.Category, heldCategories),
                 // One text box holding a list: a repeat inside it has no row
                 // to point at, so it is dropped rather than refused.
                 Tech = ProfileRules.DedupeList(p.Tech, ProfileRules.MaxProjectTech),

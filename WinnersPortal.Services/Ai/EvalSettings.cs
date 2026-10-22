@@ -32,6 +32,9 @@ public static class EvalSettings
     public const string ProviderKey = "eval.provider";
     public const string ApiKeyKey = "eval.apiKey";
 
+    /// <summary>A model server of the operator's own, for the eval provider "ollama" (<see cref="AiProviders.Local"/>).</summary>
+    public const string BaseUrlKey = "eval.baseUrl";
+
     /// <summary>The spend cap of one run, judge calls included.</summary>
     public const string MaxCallsKey = "eval.maxCalls";
 
@@ -41,6 +44,7 @@ public static class EvalSettings
     public const string ProviderEnv = "WP_EVAL_PROVIDER";
     public const string ApiKeyEnv = "WP_EVAL_API_KEY";
     public const string MaxCallsEnv = "WP_EVAL_MAX_CALLS";
+    public const string BaseUrlEnv = "WP_EVAL_BASE_URL";
 
     public const int DefaultMaxCalls = 100;
     public const int MaxMaxCalls = 10000;
@@ -56,7 +60,7 @@ public static class EvalSettings
     /// </summary>
     public sealed record Saved(
         string? Provider, string? ApiKey, string? MaxCalls = null, string? TimeoutSeconds = null,
-        string? Enabled = null, string? ModelPrices = null)
+        string? Enabled = null, string? ModelPrices = null, string? BaseUrl = null)
     {
         public bool IsEnabled => string.Equals(Enabled?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
     }
@@ -84,14 +88,21 @@ public static class EvalSettings
     /// What a run uses, and where each came from: <c>--provider</c> or
     /// <c>--max-calls</c>, <see cref="FromSettings"/>, a variable's name, or
     /// <c>default</c>. The key and its source are null when there is no
-    /// key anywhere.
+    /// key anywhere. The server address is a local provider's only, null
+    /// for a hosted one; a local provider needs no key.
     /// </summary>
     public sealed record Choice(
         string Provider, string ProviderFrom, string? ApiKey, string? ApiKeyFrom,
-        int MaxCalls, string MaxCallsFrom, int TimeoutSeconds, string TimeoutFrom);
+        int MaxCalls, string MaxCallsFrom, int TimeoutSeconds, string TimeoutFrom,
+        string? BaseUrl = null, string? BaseUrlFrom = null)
+    {
+        /// <summary>A model server of the operator's own: no key needed, nothing billed.</summary>
+        public bool Local => AiProviders.Find(Provider) is { Local: true };
+    }
 
     /// <summary>Each value from the first source that has one: the run's flag, the saved setting, the variables, the default.</summary>
-    public static Choice Choose(string? flagProvider, Saved? saved, Func<string, string?> env, int? flagMaxCalls = null)
+    public static Choice Choose(
+        string? flagProvider, Saved? saved, Func<string, string?> env, int? flagMaxCalls = null, string? flagBaseUrl = null)
     {
         var keyPin = SettingsRegistry.EnvVarName(ApiKeyKey);
         var callsPin = SettingsRegistry.EnvVarName(MaxCallsKey);
@@ -116,7 +127,16 @@ public static class EvalSettings
             Seconds(saved?.TimeoutSeconds) is { } keptTimeout ? (keptTimeout, FromSettings)
             : Seconds(env(timeoutPin)) is { } pinnedTimeout ? (pinnedTimeout, timeoutPin)
             : (DefaultTimeoutSeconds, "default");
-        return new Choice(provider.ToLowerInvariant(), providerFrom, key, keyFrom, calls, callsFrom, timeout, timeoutFrom);
+        var (address, addressFrom) =
+            Given(flagBaseUrl) is { } typedUrl ? (typedUrl, "--base-url")
+            : Given(saved?.BaseUrl) is { } keptUrl ? (keptUrl, FromSettings)
+            : Given(env(BaseUrlEnv)) is { } namedUrl ? (namedUrl, BaseUrlEnv)
+            : Given(env(SettingsRegistry.EnvVarName(BaseUrlKey))) is { } pinnedUrl ? (pinnedUrl, SettingsRegistry.EnvVarName(BaseUrlKey))
+            : ((string?)null, "default");
+        provider = provider.ToLowerInvariant();
+        var baseUrl = AiProviders.BaseUrl(provider, address);
+        return new Choice(provider, providerFrom, key, keyFrom, calls, callsFrom, timeout, timeoutFrom,
+            baseUrl, baseUrl is null ? null : addressFrom);
     }
 
     /// <summary>
@@ -130,13 +150,14 @@ public static class EvalSettings
         await using var db = new AppDbContext(AppDbContextOptions.Build(provider, connectionString));
         var rows = await db.Settings.AsNoTracking()
             .Where(s => s.Key == ProviderKey || s.Key == ApiKeyKey || s.Key == MaxCallsKey || s.Key == TimeoutKey
-                || s.Key == EnabledKey || s.Key == AiPrices.Key)
+                || s.Key == EnabledKey || s.Key == AiPrices.Key || s.Key == BaseUrlKey)
             .ToListAsync(ct);
         string? Value(string key) =>
             rows.FirstOrDefault(r => r.Key == key) is { Value: { } value } row
                 ? row.IsSecret ? settingsProtector.Unprotect(value) : value
                 : null;
-        return new Saved(Value(ProviderKey), Value(ApiKeyKey), Value(MaxCallsKey), Value(TimeoutKey), Value(EnabledKey), Value(AiPrices.Key));
+        return new Saved(Value(ProviderKey), Value(ApiKeyKey), Value(MaxCallsKey), Value(TimeoutKey), Value(EnabledKey), Value(AiPrices.Key),
+            Value(BaseUrlKey));
     }
 
     private static string? Given(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

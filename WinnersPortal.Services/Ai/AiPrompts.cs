@@ -24,7 +24,9 @@ public static class AiPrompts
     /// answer — a rule added, a shape or a length altered — and every
     /// cached answer to the old wording is re-drafted on its next request
     /// instead of being served as if nothing had changed; a typo fix needs
-    /// no bump. Whether the new wording is better is what the eval set says
+    /// no bump. Each prompt's wording is pinned under Ai/Prompts/ by its
+    /// version (PromptPinTests), so wording changed under an unchanged number
+    /// fails the build. Whether the new wording is better is what the eval set says
     /// (tests/WinnersPortal.AiEvals), and its reports name the version they
     /// scored. The spam scan has no prompt and no version.
     /// </summary>
@@ -319,6 +321,38 @@ public static class AiPrompts
                 nameof(feature), feature, "That feature does not read the opportunity form."),
         };
     }
+
+    /// <summary>Where a pinned prompt holds the member's data (<see cref="Template"/>).</summary>
+    public const string InputPlaceholder = "«input»";
+
+    /// <summary>Where a pinned prompt holds the category list the portal sends beside the data.</summary>
+    public const string TaxonomyPlaceholder = "«taxonomy»";
+
+    /// <summary>
+    /// A feature's prompt with placeholders where the data goes: the
+    /// wording alone, the part <see cref="Version"/> answers for. A test
+    /// keeps a committed copy of each, headed by its version, so wording
+    /// changed with the number left alone fails the build rather than
+    /// serving answers cached under the old wording as if they were new.
+    /// </summary>
+    public static (string System, string User) Template(AiFeature feature) => feature switch
+    {
+        AiFeature.CategorySuggestion => Categorise(TaxonomyPlaceholder, InputPlaceholder),
+        AiFeature.BriefCoach => Coach(InputPlaceholder),
+        AiFeature.RequirementsSuggestion => Requirements(InputPlaceholder),
+        AiFeature.MilestoneExtraction => Milestones(InputPlaceholder),
+        AiFeature.CriteriaSuggestion => Criteria(InputPlaceholder),
+        AiFeature.SeoMetadata => Seo(InputPlaceholder),
+        AiFeature.EntryDigest => Digest(InputPlaceholder),
+        AiFeature.ProgressNarrative => Narrative(InputPlaceholder),
+        AiFeature.StandingNotes => Standing(InputPlaceholder),
+        AiFeature.RecommendedMatching => WorkKinds(TaxonomyPlaceholder, InputPlaceholder),
+        AiFeature.ProfileSummary => ProfileSummary(InputPlaceholder),
+        AiFeature.ProfileReview => ProfileReview(InputPlaceholder),
+        AiFeature.ProjectApproach => ProjectApproach(InputPlaceholder),
+        AiFeature.ApplicationEvaluation => ApplicationEvaluation(InputPlaceholder),
+        _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, "That feature has no prompt."),
+    };
 }
 
 /// <summary>
@@ -336,11 +370,11 @@ public static class AiInputs
     /// answer could have been the new one.
     /// </summary>
     public static string Taxonomy() => JsonSerializer.Serialize(
-        Opportunities.OpportunityCategories.All.Select(c => new
+        Opportunities.OpportunityCategories.Offered.Select(c => new
         {
             key = c.Key,
             label = c.Label,
-            subcategories = c.Subcategories.Select(s => new { key = s.Key, label = s.Label }),
+            subcategories = c.Subcategories.Where(s => !s.Hidden).Select(s => new { key = s.Key, label = s.Label }),
         }));
 
     /// <summary>
@@ -601,8 +635,9 @@ public static class AiInputs
         // Labels, not keys: the model is being asked to write a sentence,
         // and "devops" is not a phrase anybody would use in one. Unknown
         // keys fall out here the same way they do on a save.
+        // A retired category the member already holds is still theirs to be described by.
         var (primaryKey, secondaryKeys) = Profiles.ProfileRules.CleanCategories(
-            r.PrimaryCategory, r.SecondaryCategories);
+            r.PrimaryCategory, r.SecondaryCategories, [r.PrimaryCategory, .. r.SecondaryCategories ?? []]);
         var primaryCategory = Opportunities.OpportunityCategories.Find(primaryKey)?.Label;
         var otherCategories = secondaryKeys
             .Select(k => Opportunities.OpportunityCategories.Find(k)?.Label)

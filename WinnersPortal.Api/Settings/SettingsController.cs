@@ -232,7 +232,7 @@ public sealed class SettingsController(SettingsAdminService settingsAdmin) : Con
         {
             var model = config.Model ?? AiProviderRequests.DefaultModel(config.Provider);
             var (system, user) = AiPrompts.Ping;
-            var answer = await providerClient.CompleteAsync(config.Provider, model, config.ApiKey, system, user, AiOutputs.PingSchema, ct, "settings test");
+            var answer = await providerClient.CompleteAsync(config.Provider, model, config.ApiKey, system, user, AiOutputs.PingSchema, ct, "settings test", config.BaseUrl);
             await quota.SpendAsync(AiSpender.Portal, AiPrompts.SettingsTestFeature, config.Provider, model, answer.Tokens ?? AiTokens.None, ct);
             var cost = answer.Tokens is { } t && (await ai.PricesAsync(ct)).Cost(model, t) is { } usd ? $", about {AiPrices.Dollars(usd)}" : "";
             return await Answer(true,

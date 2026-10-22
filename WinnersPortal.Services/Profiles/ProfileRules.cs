@@ -266,9 +266,17 @@ public static class ProfileRules
     /// One key as the taxonomy spells it, or null for anything it does not
     /// know — which is how a retired category leaves a profile rather than
     /// making it unsaveable. Used for a member's own kinds of work and for
-    /// the kind each piece of past work was.
+    /// the kind each piece of past work was. A hidden category stays only
+    /// where the profile already had it (<paramref name="kept"/>): retired
+    /// for new choices, not taken from anybody who made it.
     /// </summary>
-    public static string? CleanCategory(string? key) => OpportunityCategories.Find(key)?.Key;
+    public static string? CleanCategory(string? key, IEnumerable<string?>? kept = null)
+    {
+        var found = OpportunityCategories.Find(key);
+        if (found is null) return null;
+        if (!found.Hidden) return found.Key;
+        return kept?.Any(k => OpportunityCategories.CleanKey(k) == found.Key) == true ? found.Key : null;
+    }
 
     /// <summary>
     /// The kinds of work a member says they do: one primary, and up to three
@@ -276,19 +284,21 @@ public static class ProfileRules
     /// the opportunity taxonomy — the same list a brief is filed under, which is
     /// the whole point of asking — and anything else is dropped rather than
     /// refused: a category retired from the registry must not be able to
-    /// make somebody's profile unsaveable.
+    /// make somebody's profile unsaveable. <paramref name="kept"/> is what
+    /// the profile held before: a hidden category in it may stay.
     /// </summary>
     public static (string? Primary, List<string> Secondary) CleanCategories(
-        string? primary, IEnumerable<string?>? secondary)
+        string? primary, IEnumerable<string?>? secondary, IEnumerable<string?>? kept = null)
     {
-        var first = CleanCategory(primary);
+        var held = kept?.ToList();
+        var first = CleanCategory(primary, held);
         var rest = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         if (first is not null) seen.Add(first);
         foreach (var key in secondary ?? [])
         {
             if (rest.Count == MaxSecondaryCategories) break;
-            if (CleanCategory(key) is not { } found) continue;
+            if (CleanCategory(key, held) is not { } found) continue;
             if (seen.Add(found)) rest.Add(found);
         }
         return (first, rest);

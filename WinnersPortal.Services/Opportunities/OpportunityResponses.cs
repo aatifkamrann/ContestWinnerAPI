@@ -239,7 +239,19 @@ public sealed record OpportunityEntrant
     /// Null otherwise.
     /// </summary>
     public required string? FinalPreview { get; init; }
+    /// <summary>
+    /// One per milestone, in order, on a competitive opportunity whose board
+    /// shows: each claim's reviews — on every row for the client and
+    /// administrators, on their own row for the entrant. Null for everyone
+    /// else, and on a job paid by milestone (its reviews ride the payments).
+    /// </summary>
+    public required List<ClaimReviewCell>? Reviews { get; init; }
 }
+
+/// <summary>The reviews of one board cell: the claim they answer, where it stands, and every decision, oldest first.</summary>
+/// <param name="CheckpointId">The claim a review is posted to; null while the milestone is unclaimed.</param>
+/// <param name="State">unclaimed, unreviewed, approved, changes_requested, or updated — work landed after a request for changes.</param>
+public sealed record ClaimReviewCell(Guid? CheckpointId, string State, IReadOnlyList<MilestoneReviewView> Reviews);
 
 /// <summary>The build behind one board cell: its state, the checkpoint the dialog asks about, and whether its preview is up.</summary>
 /// <param name="Status">none (unclaimed, or nothing to build), pending, building, built or failed.</param>
@@ -361,6 +373,24 @@ public sealed record MilestonePaymentView
     public required string? Ref { get; init; }
     public required string? ChangesNote { get; init; }
     public required DateTimeOffset? ChangesRequestedAtUtc { get; init; }
+    /// <summary>
+    /// Every decision on this milestone, oldest first — approvals and
+    /// requests for changes with their remarks and advice. The owner's, an
+    /// administrator's and the hired freelancer's alone; null for anyone else.
+    /// </summary>
+    public required IReadOnlyList<MilestoneReviewView>? Reviews { get; init; }
+}
+
+/// <summary>One decision on a milestone handed in, as the board shows it.</summary>
+public sealed record MilestoneReviewView
+{
+    /// <summary>"approved" or "changes_requested".</summary>
+    public required string Decision { get; init; }
+    public required string? Note { get; init; }
+    public required string? Advice { get; init; }
+    /// <summary>An administrator decided on the client's behalf.</summary>
+    public required bool OnBehalf { get; init; }
+    public required DateTimeOffset AtUtc { get; init; }
 }
 
 /// <summary>A rating one party of an award left for the other.</summary>

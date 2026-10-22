@@ -183,7 +183,7 @@ public static class MilestonePay
     public const int MinChangesNote = 10;
 
     /// <summary>Why the client may not send this milestone back, or null: only one handed in and not yet approved, with a reason the freelancer can act on.</summary>
-    public static string? ChangesProblem(MilestonePayState state, string? note)
+    public static string? ChangesProblem(MilestonePayState state, string? note, string? advice = null)
     {
         if (state != MilestonePayState.Submitted)
             return state switch
@@ -192,11 +192,47 @@ public static class MilestonePay
                 MilestonePayState.Approved or MilestonePayState.Paid => "This milestone is already approved.",
                 _ => "This milestone has not been handed in yet.",
             };
+        return ChangesWordsProblem(note, advice);
+    }
+
+    /// <summary>
+    /// Why a request for changes cannot be sent with these words, or null:
+    /// what should change, in a sentence the freelancer can act on, and the
+    /// optional advice. The same words on either kind of opportunity.
+    /// </summary>
+    public static string? ChangesWordsProblem(string? note, string? advice)
+    {
         var text = note?.Trim() ?? "";
         if (text.Length < MinChangesNote) return "Say what should change — a sentence the freelancer can act on.";
         if (text.Length > Checkpoint.MaxChangesNote) return $"Keep the request under {Checkpoint.MaxChangesNote} characters.";
-        return null;
+        return AdviceProblem(advice);
     }
+
+    /// <summary>
+    /// Why an approval's words cannot be saved, or null. Both are optional:
+    /// remarks on what was good, and advice for the milestones ahead — the
+    /// direction the freelancer carries into the next one.
+    /// </summary>
+    public static string? ApprovalProblem(MilestonePayState state, string? note, string? advice) =>
+        ApproveProblem(state) ?? ApprovalWordsProblem(note, advice);
+
+    /// <summary>Why an approval's words cannot be saved, or null: both optional, and only ever too long.</summary>
+    public static string? ApprovalWordsProblem(string? note, string? advice) =>
+        (note?.Trim().Length ?? 0) > MilestoneReview.MaxNote
+            ? $"Keep the remarks under {MilestoneReview.MaxNote} characters."
+            : AdviceProblem(advice);
+
+    /// <summary>Why the advice cannot be saved, or null: it is optional, and only ever too long.</summary>
+    public static string? AdviceProblem(string? advice) =>
+        (advice?.Trim().Length ?? 0) > MilestoneReview.MaxAdvice
+            ? $"Keep the advice under {MilestoneReview.MaxAdvice} characters."
+            : null;
+
+    /// <summary>A reviewer's text as it is stored: trimmed, and null when there is none.</summary>
+    public static string? Clean(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    public static string DecisionName(MilestoneReviewDecision decision) =>
+        decision == MilestoneReviewDecision.Approved ? "approved" : "changes_requested";
 
     /// <summary>
     /// Why the client may not mark this milestone paid, or null. A milestone

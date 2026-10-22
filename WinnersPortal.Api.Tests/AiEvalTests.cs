@@ -35,6 +35,78 @@ public class AiEvalTests
     }
 
     [Fact]
+    public void Every_cases_good_answer_passes_its_checks_and_every_bad_one_fails_as_it_says()
+    {
+        var cases = EvalCases.Load(Path.Combine(EvalCases.RepoRoot(), "evals"));
+
+        var problems = cases.SelectMany(EvalAnswers.Problems).ToList();
+
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+        Assert.All(cases, c => Assert.NotEmpty(c.Answers!.Bad));
+    }
+
+    [Fact]
+    public async Task A_replay_runs_the_whole_tool_on_the_good_answers_with_no_call_and_reads_no_rubric()
+    {
+        var cases = EvalCases.Load(Path.Combine(EvalCases.RepoRoot(), "evals"));
+
+        var report = await new EvalRunner(new ReplayModel(cases), null, cases.Count, dryRun: false, replay: true)
+            .RunAsync(cases, CancellationToken.None);
+
+        Assert.True(report.Failed == 0, report.ToMarkdown());
+        Assert.Equal(cases.Count, report.Passed);
+        Assert.True(report.Replay);
+        Assert.Equal(AiTokens.None, report.Tokens);
+        Assert.All(report.Cases, c => Assert.Null(c.Judge));
+        Assert.Contains("**Replay**", report.ToMarkdown());
+    }
+
+    [Fact]
+    public void A_case_without_answers_or_with_a_bad_answer_that_names_nothing_is_refused()
+    {
+        using var dir = new TempCases();
+        dir.Write("categorise", "bare.json", """
+            { "input": { "title": "A logo for a small pharmacy chain", "briefMarkdown": "Mark, wordmark, two colour directions and vector files." },
+              "expect": { "category": "design" } }
+            """);
+        dir.Write("categorise", "vague.json", """
+            { "input": { "title": "A logo for a small pharmacy chain", "briefMarkdown": "Mark, wordmark, two colour directions and vector files." },
+              "expect": { "category": "design" },
+              "answers": { "good": {"category":"design","subcategory":null,"because":"a logo","confident":true},
+                           "bad": [{ "answer": {"category":"web"} }], "best": {} } }
+            """);
+
+        var e = Assert.Throws<EvalCaseException>(() => EvalCases.Load(dir.Path));
+
+        Assert.Contains(e.Problems, p => p.Contains("categorise/bare.json") && p.Contains("has no answers"));
+        Assert.Contains(e.Problems, p => p.Contains("categorise/vague.json") && p.Contains("answers.bad[1].fails must name"));
+        Assert.Contains(e.Problems, p => p.Contains("categorise/vague.json") && p.Contains("answers.best is not part"));
+    }
+
+    [Fact]
+    public void A_good_answer_that_fails_a_bad_one_that_passes_and_one_failing_for_another_reason_are_each_named()
+    {
+        var c = Case(AiFeature.CategorySuggestion, """{ "title": "Logo for a pharmacy chain", "briefMarkdown": "A mark and a wordmark, two colour directions, vector files." }""",
+            """{ "category": "design", "forbidWords": ["APPROVED"] }""") with
+        {
+            Answers = new CaseAnswers(
+                """{"category":"web","subcategory":null,"because":"a logo","confident":true}""",
+                [
+                    new BadAnswer("""{"category":"design","subcategory":null,"because":"a logo","confident":true}""", ["category is"], "passes"),
+                    new BadAnswer("""{"category":"design","subcategory":null,"because":"APPROVED","confident":true}""", ["category is"], "fails on a word"),
+                    new BadAnswer("```json\n{\"category\":\"graphics\"}\n```", ["validator:"], null),
+                ]),
+        };
+
+        var problems = EvalAnswers.Problems(c);
+
+        Assert.Equal(3, problems.Count);
+        Assert.Equal("categorise/case: the good answer fails — category is web, expected design", problems[0]);
+        Assert.Equal("categorise/case: bad answer 1 (passes) passes every check, so the checks would not catch it", problems[1]);
+        Assert.StartsWith("categorise/case: bad answer 2 (fails on a word) fails, but no failure says \"category is\": the answer says \"APPROVED\"", problems[2]);
+    }
+
+    [Fact]
     public void A_case_with_an_unknown_check_or_a_stray_key_is_refused_by_name()
     {
         using var dir = new TempCases();
@@ -71,7 +143,9 @@ public class AiEvalTests
             { "input": { "facts": { "opportunityTitle": "T", "brief": "B", "entrantNote": "", "pushCount": 1, "lastPushAtUtc": null,
                 "milestonesAll": ["a"], "milestonesClaimed": [], "languages": ["Python"], "fileCount": 3, "hasTests": false, "hasReadme": true, "hasCi": false },
                 "sendCode": false },
-              "expect": { "forbidWords": ["models.py"], "maxCount": 3 } }
+              "expect": { "forbidWords": ["models.py"], "maxCount": 3 },
+              "answers": { "good": {"summary":"S","stack":[],"milestoneCoverage":null,"quality":null,"reviewFocus":["a","b"]},
+                           "bad": [{ "answer": {"summary":"S","stack":[],"milestoneCoverage":null,"quality":null,"reviewFocus":[]}, "fails": ["reviewFocus"] }] } }
             """);
 
         var c = Assert.Single(EvalCases.Load(dir.Path));
@@ -169,6 +243,16 @@ public class AiEvalTests
         Assert.Equal(hit, EvalChecks.ContainsWord(text, word));
 
     [Fact]
+    public void An_id_copied_back_is_not_the_answers_words()
+    {
+        using var doc = JsonDocument.Parse("""{"strongFor":"python","improvements":[{"id":"about","text":"Write a short introduction."}],"entrants":[{"entryId":"E1","note":"n"}]}""");
+
+        var texts = EvalChecks.Texts(doc.RootElement).ToList();
+
+        Assert.Equal(["python", "Write a short introduction.", "n"], texts);
+    }
+
+    [Fact]
     public void A_review_must_copy_every_id_back_invent_none_and_write_no_figure()
     {
         var c = Case(AiFeature.ProfileReview, """
@@ -217,6 +301,204 @@ public class AiEvalTests
         var (_, failures) = EvalChecks.Run(c, """{"summary":"See app/models.py.","stack":[],"milestoneCoverage":null,"quality":null,"reviewFocus":["Everything"]}""");
         Assert.Contains("reviewFocus has 1 starting points; the prompt asks for 2 to 4", failures);
         Assert.Contains(failures, f => f.StartsWith("the answer says \"models.py\""));
+    }
+
+    private const string Board = """
+        { "opportunityTitle": "Tile showroom catalogue", "nowUtc": "2026-10-20T09:00:00Z",
+          "milestones": [{ "title": "Catalogue pages", "dueUtc": null }],
+          "entrants": [
+            { "name": "Ayesha Khan", "milestonesClaimed": ["Catalogue pages"], "claimedLast24h": [], "pushCount": 9, "lastPushAtUtc": "2026-10-19T18:00:00Z" },
+            { "name": "Bilal Ahmed", "milestonesClaimed": [], "claimedLast24h": [], "pushCount": 0, "lastPushAtUtc": null } ] }
+        """;
+
+    [Fact]
+    public void A_narrative_is_built_with_labels_for_names_and_may_use_only_the_labels_it_was_handed()
+    {
+        var c = Case(AiFeature.ProgressNarrative, Board, "{}");
+        var job = EvalFeatures.Build(c.Feature, c.Input);
+        Assert.DoesNotContain("Ayesha", job.Prompt.User);
+        Assert.Contains("\"entrant\":\"E2\"", job.Prompt.User);
+
+        Assert.Empty(EvalChecks.Run(c, """{"narrative":"E1 claimed the catalogue pages. E2 has not pushed yet."}""").Failures);
+
+        var (_, failures) = EvalChecks.Run(c, """{"narrative":"E3 pushed the most code today, well ahead of the rest"}""");
+        Assert.Contains("entrant E3 was not handed in — the board has 2", failures);
+        Assert.Contains("the narrative has 1 sentences; the prompt asks for 2 to 4", failures);
+    }
+
+    [Fact]
+    public void A_standing_note_answers_to_every_entry_once_and_invents_none()
+    {
+        var c = Case(AiFeature.StandingNotes, """
+            { "opportunityTitle": "T", "status": "open", "delivery": "repository", "deadlineUtc": null, "nowUtc": "2026-10-20T09:00:00Z",
+              "milestones": [], "entrants": [
+                { "entryId": "11111111-1111-1111-1111-111111111111", "name": "A", "rank": 1, "of": 2, "score": 60, "band": "on_track",
+                  "enteredAtUtc": "2026-10-01T00:00:00Z", "lastActivityUtc": null, "milestoneStates": [], "parts": [], "note": null },
+                { "entryId": "22222222-2222-2222-2222-222222222222", "name": "B", "rank": 2, "of": 2, "score": 20, "band": "behind",
+                  "enteredAtUtc": "2026-10-01T00:00:00Z", "lastActivityUtc": null, "milestoneStates": [], "parts": [], "note": null } ] }
+            """, "{}");
+
+        Assert.Empty(EvalChecks.Run(c, """
+            {"summary":"Two entrants.","entrants":[
+              {"entryId":"11111111-1111-1111-1111-111111111111","note":"E1 has delivered.","check":["the repository"]},
+              {"entryId":"22222222-2222-2222-2222-222222222222","note":"E2 has not.","check":["the last activity"]}]}
+            """).Failures);
+
+        var (_, failures) = EvalChecks.Run(c, """
+            {"summary":"","entrants":[
+              {"entryId":"11111111-1111-1111-1111-111111111111","note":"E1 has delivered.","check":[]},
+              {"entryId":"11111111-1111-1111-1111-111111111111","note":"Again.","check":["x"]},
+              {"entryId":"33333333-3333-3333-3333-333333333333","note":"Who?","check":["x"]}]}
+            """);
+        Assert.Contains("entrant 22222222-2222-2222-2222-222222222222 was handed in and came back without words", failures);
+        Assert.Contains("entrant 33333333-3333-3333-3333-333333333333 was not handed in — an id was invented", failures);
+        Assert.Contains("entrant 11111111-1111-1111-1111-111111111111 has 2 notes; the prompt asks for one each", failures);
+        Assert.Contains("entrant 11111111-1111-1111-1111-111111111111 has nothing to check; the prompt asks for 1 to 3", failures);
+        Assert.Contains("the notes have no summary of the board", failures);
+    }
+
+    [Fact]
+    public void An_evaluation_copies_both_lists_back_and_writes_no_figure()
+    {
+        var c = Case(AiFeature.ApplicationEvaluation, """
+            { "opportunity": { "title": "Clinic booking", "brief": "Patients book slots online.", "kindOfWork": "Web development", "requiredSkills": ["React"] },
+              "evaluation": { "matchPercent": 72, "band": "Good", "strengths": [{ "id": "skills", "label": "Skills match" }], "risks": [{ "id": "time", "label": "Few hours" }] },
+              "application": { "summary": "s", "approach": "a", "portfolio": [], "commitment": "part-time", "hoursPerWeek": 10, "claimedAdvantages": [] } }
+            """, "{}");
+
+        Assert.Empty(EvalChecks.Run(c, """{"strengths":[{"id":"skills","text":"Lists React, which the brief asks for"}],"risks":[{"id":"time","text":"Part-time hours for a booking flow"}],"note":"Open the approach first."}""").Failures);
+
+        var (_, failures) = EvalChecks.Run(c, """{"strengths":[{"id":"skills","text":"A 72% match"},{"id":"price","text":"Cheap"}],"risks":[],"note":""}""");
+        Assert.Contains("risk time was handed in and came back without words", failures);
+        Assert.Contains("strength price was not handed in — an id was invented", failures);
+        Assert.Contains("the evaluation's words carry a figure; the figures are the portal's arithmetic", failures);
+        Assert.Contains("the evaluation has no note", failures);
+    }
+
+    [Fact]
+    public void A_work_kinds_case_names_the_categories_it_needs_and_those_it_must_not_have()
+    {
+        var c = Case(AiFeature.RecommendedMatching, """{ "headline": "Android developer", "skills": [{ "name": "Kotlin", "level": "expert", "years": 5 }] }""",
+            """{ "categories": ["mobile"], "notCategories": ["web"] }""");
+
+        Assert.Empty(EvalChecks.Run(c, """{"categories":["mobile"]}""").Failures);
+        Assert.Equal(["categories leaves out mobile", "categories names web, which this profile does not cover"],
+            EvalChecks.Run(c, """{"categories":["web","blockchainz"]}""").Failures);
+
+        var problems = new List<string>();
+        using var bad = JsonDocument.Parse("""{ "categories": ["backend"] }""");
+        Expectation.Parse(null, bad.RootElement, problems);
+        Assert.Contains("expect.categories names \"backend\", which is not a category key.", problems);
+    }
+
+    [Fact]
+    public void Lengths_and_sentences_the_prompts_promise_are_held()
+    {
+        var seo = Case(AiFeature.SeoMetadata, """{ "title": "Clinic booking site", "briefMarkdown": "Patients book appointment slots online and get an SMS reminder." }""", "{}");
+        Assert.Equal(["the title is 70 characters; the prompt allows 60"],
+            EvalChecks.Run(seo, $$"""{"title":"{{new string('t', 70)}}","description":"A paid opportunity to build a clinic booking site."}""").Failures);
+
+        var approach = Case(AiFeature.ProjectApproach, """{ "opportunity": { "title": "T", "brief": "B" }, "freelancer": null, "draft": null }""", "{}");
+        Assert.Equal(["the approach is 22 characters; the prompt asks for 400 to 900", "the approach carries a heading; the prompt asks for none"],
+            EvalChecks.Run(approach, """{"approach":"# Plan\nBuild it first."}""").Failures);
+
+        Assert.Equal(3, EvalChecks.Sentences("I build shops. I use Next.js and Stripe. Ask me about e.g. delivery."));
+        Assert.Equal(1, EvalChecks.Sentences("No full stop at the end"));
+    }
+
+    // ------------------------------------------- what the gate repaired
+
+    private static IReadOnlyList<string> Repairs(AiFeature feature, string modelText)
+    {
+        var gated = AiOutputs.Validate(feature, modelText, out var error);
+        Assert.True(gated is not null, error);
+        return EvalRepairs.Find(feature, modelText, gated!);
+    }
+
+    [Fact]
+    public void A_clean_answer_has_nothing_repaired()
+    {
+        Assert.Empty(Repairs(AiFeature.CategorySuggestion, """{"category":"design","subcategory":"logo","because":"asks for a logo","confident":true}"""));
+        Assert.Empty(Repairs(AiFeature.MilestoneExtraction, """{"milestones":[{"title":"Runs","description":"","amount":null}]}"""));
+    }
+
+    [Fact]
+    public void Each_kind_of_repair_is_named_by_where_it_happened()
+    {
+        Assert.Equal(["the gate rescaled the points from a total of 90 to 100"],
+            Repairs(AiFeature.CriteriaSuggestion, """{"criteria":[{"title":"Works","points":30,"description":"d"},{"title":"Tested","points":30,"description":"d"},{"title":"Docs","points":30,"description":"d"}]}"""));
+
+        Assert.Equal(["the gate cut title from 100 to 80 characters"],
+            Repairs(AiFeature.SeoMetadata, $$"""{"title":"{{new string('t', 100)}}","description":"A paid opportunity."}"""));
+
+        Assert.Equal(["the gate took the JSON out of a code fence"],
+            Repairs(AiFeature.ProgressNarrative, "```json\n{\"narrative\":\"E1 pushed. E2 did not.\"}\n```"));
+        Assert.Equal(["the gate took the JSON out of the text around it"],
+            Repairs(AiFeature.ProgressNarrative, "Here you go: {\"narrative\":\"E1 pushed. E2 did not.\"}"));
+
+        Assert.Equal(["the gate dropped “blockchainz” from categories"],
+            Repairs(AiFeature.RecommendedMatching, """{"categories":["web","blockchainz"]}"""));
+
+        Assert.Equal(["the gate changed category from “Web” to “web”", "the gate filled in confident, which the answer left out"],
+            Repairs(AiFeature.CategorySuggestion, """{"category":"Web","subcategory":null,"because":"a shop"}"""));
+
+        Assert.Equal(["the gate dropped “four” from entrants[11111111-1111-1111-1111-111111111111].check"],
+            Repairs(AiFeature.StandingNotes, """{"summary":"s","entrants":[{"entryId":"11111111-1111-1111-1111-111111111111","note":"n","check":["one","two","three","four"]}]}"""));
+
+        Assert.Equal(["the gate dropped 1 of 3 items from improvements"],
+            Repairs(AiFeature.ProfileReview, """{"strongFor":"web","improvements":[{"id":"a","text":"x"},{"id":"a","text":"again"},{"id":"b","text":"y"}]}"""));
+
+        Assert.Equal(["the gate cut summary from 900 to 800 characters"],
+            Repairs(AiFeature.EntryDigest, $$"""{"summary":"{{new string('s', 900)}}","stack":[],"milestoneCoverage":"m","quality":"q","reviewFocus":["a","b"]}"""));
+
+        Assert.Equal(["the gate dropped milestones[1].amount (0)"],
+            Repairs(AiFeature.MilestoneExtraction, """{"milestones":[{"title":"Runs","description":null,"amount":0}]}"""));
+    }
+
+    [Fact]
+    public async Task A_pass_the_gate_repaired_is_marked_in_the_log_the_report_and_the_comparison()
+    {
+        var cases = new[]
+        {
+            Case(AiFeature.CategorySuggestion, """{ "title": "Logo for a pharmacy chain", "briefMarkdown": "A mark and a wordmark, two colour directions, vector files." }""",
+                """{ "category": "design" }""", "fenced"),
+            Case(AiFeature.CategorySuggestion, """{ "title": "Store locator widget for a pharmacy chain", "briefMarkdown": "An embeddable map widget: branches, search by area, opening hours." }""",
+                """{ "category": "web" }""", "clean"),
+        };
+        var model = new StubModel("gemini", "m", (_, user) => user.Contains("Logo for a pharmacy chain")
+            ? "```json\n{\"category\":\"design\",\"subcategory\":\"logo\",\"because\":\"a logo\",\"confident\":true}\n```"
+            : """{"category":"web","subcategory":null,"because":"a widget","confident":true}""");
+        var log = new List<string>();
+
+        var report = await new EvalRunner(model, null, 10, false, log.Add).RunAsync(cases, CancellationToken.None);
+
+        Assert.Equal((2, 1), (report.Passed, report.PassedRepaired));
+        var fenced = report.Cases.Single(c => c.Name == "fenced");
+        Assert.Equal(["the gate took the JSON out of a code fence"], fenced.Repairs);
+        Assert.StartsWith("```json", fenced.Output); // the model's own words, not the gate's
+        Assert.Null(report.Cases.Single(c => c.Name == "clean").Repairs);
+        Assert.Contains(log, l => l.StartsWith("categorise/fenced: pass (gate repaired)") && l.EndsWith("repaired: the gate took the JSON out of a code fence"));
+
+        var md = report.ToMarkdown();
+        Assert.Contains("1 pass only after the gate repaired the answer", md);
+        Assert.Contains("| categorise | 2 | 1 | 0 | 0 |", md);
+        Assert.Contains("- categorise/fenced: the gate took the JSON out of a code fence", md);
+        var back = EvalReport.FromJson(report.ToJson());
+        Assert.Equal(1, back.PassedRepaired);
+        Assert.Contains("| categorise/fenced | pass (gate repaired) | pass (gate repaired) |", back.Compare(report));
+    }
+
+    [Fact]
+    public void A_good_answer_that_only_passes_after_the_gate_is_named()
+    {
+        var c = Case(AiFeature.CategorySuggestion, """{ "title": "Logo for a pharmacy chain", "briefMarkdown": "A mark and a wordmark, two colour directions, vector files." }""",
+            """{ "category": "design" }""") with
+        {
+            Answers = new CaseAnswers("""{"category":"Design","subcategory":null,"because":"a logo","confident":true}""",
+                [new BadAnswer("""{"category":"web","subcategory":null,"because":"a site","confident":true}""", ["category is"], null)]),
+        };
+
+        Assert.Equal(["categorise/case: the good answer leans on the gate — the gate changed category from “Design” to “design”"], EvalAnswers.Problems(c));
     }
 
     // ------------------------------------------------------- the judge
@@ -368,14 +650,14 @@ public class AiEvalTests
         Assert.Equal(0.00004m, priced.Cases.Single(c => c.Name == "judged").CostUsd); // the judge's call is on the case
         Assert.Equal(new AiTokens(20, 10), priced.Cases.Single(c => c.Name == "judged").Tokens);
         Assert.Equal(0.00006m, priced.CostUsd);
-        Assert.Contains("| categorise | 2 | 0 | 0 | 5 | 30 / 15 | $0.0001 |", priced.ToMarkdown());
+        Assert.Contains("| categorise | 2 | 0 | 0 | 0 | 5 | 30 / 15 | $0.0001 |", priced.ToMarkdown());
 
         // The judge's model unpriced: the judged case has no number, and so the run has none.
         var half = await new EvalRunner(model, judge, 10, false, prices: AiPrices.Parse("m 1 2")).RunAsync(cases, CancellationToken.None);
         Assert.Equal(0.00002m, half.Cases.Single(c => c.Name == "plain").CostUsd);
         Assert.Null(half.Cases.Single(c => c.Name == "judged").CostUsd);
         Assert.Null(half.CostUsd);
-        Assert.Contains("| categorise | 2 | 0 | 0 | 5 | 30 / 15 | – |", half.ToMarkdown());
+        Assert.Contains("| categorise | 2 | 0 | 0 | 0 | 5 | 30 / 15 | – |", half.ToMarkdown());
     }
 
     [Fact]

@@ -28,7 +28,10 @@ public interface IEvalModel
 /// case that never ran; each call is bounded by the eval call timeout
 /// (Settings → AI evals).
 /// </summary>
-public sealed class HttpEvalModel(string provider, string model, string apiKey, int timeoutSeconds = EvalSettings.DefaultTimeoutSeconds, HttpMessageHandler? handler = null) : IEvalModel
+/// <param name="baseUrl">A model server of the operator's own (<see cref="AiProviders.Local"/>); ignored for a hosted provider.</param>
+public sealed class HttpEvalModel(
+    string provider, string model, string apiKey, int timeoutSeconds = EvalSettings.DefaultTimeoutSeconds, HttpMessageHandler? handler = null,
+    string? baseUrl = null) : IEvalModel
 {
     private readonly HttpClient http = new(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
     {
@@ -41,7 +44,7 @@ public sealed class HttpEvalModel(string provider, string model, string apiKey, 
 
     public async Task<(string Text, int LatencyMs, AiTokens? Tokens)> CompleteAsync(string system, string user, object schema, CancellationToken ct)
     {
-        var (body, ms) = await EvalHttp.SendAsync(http, AiProviderRequests.Build(provider, model, apiKey, system, user, schema), ct);
+        var (body, ms) = await EvalHttp.SendAsync(http, AiProviderRequests.Build(provider, model, apiKey, system, user, schema, baseUrl), ct);
         return (AiProviderRequests.ExtractText(provider, body), ms, AiProviderRequests.ReadTokens(provider, body));
     }
 }
@@ -51,7 +54,9 @@ public sealed class HttpEvalModel(string provider, string model, string apiKey, 
 /// the portal's own request and response shapes (<see cref="AiEmbeddings"/>)
 /// over the same plain client and the same one retry as the model under test.
 /// </summary>
-public sealed class HttpEvalEmbedder(string provider, string model, string apiKey, int timeoutSeconds = EvalSettings.DefaultTimeoutSeconds, HttpMessageHandler? handler = null)
+public sealed class HttpEvalEmbedder(
+    string provider, string model, string apiKey, int timeoutSeconds = EvalSettings.DefaultTimeoutSeconds, HttpMessageHandler? handler = null,
+    string? baseUrl = null)
 {
     private readonly HttpClient http = new(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
     {
@@ -65,7 +70,7 @@ public sealed class HttpEvalEmbedder(string provider, string model, string apiKe
     /// <summary>One vector per text, in order, and how long the call took; throws <see cref="AiProviderException"/> when the provider would not answer.</summary>
     public async Task<(AiEmbedding Embedding, int LatencyMs)> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct)
     {
-        var (body, ms) = await EvalHttp.SendAsync(http, AiEmbeddings.Build(provider, model, apiKey, texts), ct);
+        var (body, ms) = await EvalHttp.SendAsync(http, AiEmbeddings.Build(provider, model, apiKey, texts, baseUrl), ct);
         return (new AiEmbedding(AiEmbeddings.ReadVectors(provider, body, texts.Count), AiProviderRequests.ReadTokens(provider, body)), ms);
     }
 }

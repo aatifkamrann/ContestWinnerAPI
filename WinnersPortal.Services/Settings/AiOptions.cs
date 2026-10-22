@@ -91,7 +91,7 @@ public sealed class AiOptions(SettingsService settings)
     public async Task<decimal?> DailyBudgetUsdAsync(CancellationToken ct = default) =>
         AiPrices.ParseBudget(await settings.GetAsync(AiPrices.BudgetKey, ct));
 
-    /// <summary>Provider, model, key of the active setup — or null while none is active or it has no key.</summary>
+    /// <summary>Provider, model, key and address of the active setup — or null while none is active, or a hosted provider's has no key.</summary>
     public async Task<AiProviderConfig?> ProviderConfigAsync(CancellationToken ct = default) =>
         await settings.ActiveSetupAsync(Setups.Ai, ct) is { } active ? Config(active) : null;
 
@@ -135,15 +135,21 @@ public sealed class AiOptions(SettingsService settings)
         return new AiRoute(active, model, await StandbyConfigAsync(ct));
     }
 
-    /// <summary>Pure: provider, model, key — or null while the setup has no key.</summary>
+    /// <summary>
+    /// Pure: provider, model, key and, for a local server, its address — or
+    /// null while a hosted provider's setup has no key. A local server is
+    /// ready with none: inside the network it asks for none, and a gateway
+    /// in front of it is given the key the setup holds.
+    /// </summary>
     public static AiProviderConfig? Config(SetupValues s)
     {
-        var apiKey = s.Get("ai.apiKey");
-        if (string.IsNullOrWhiteSpace(apiKey)) return null;
+        var apiKey = s.Get("ai.apiKey") ?? "";
         var provider = s.Get("ai.provider")?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(provider)) provider = AiProviders.Gemini;
+        if (string.IsNullOrWhiteSpace(apiKey) && AiProviders.Find(provider) is not { Local: true }) return null;
         var model = s.Get("ai.model")?.Trim();
-        return new AiProviderConfig(provider, string.IsNullOrWhiteSpace(model) ? null : model, apiKey, s.Name);
+        return new AiProviderConfig(provider, string.IsNullOrWhiteSpace(model) ? null : model, apiKey, s.Name,
+            AiProviders.BaseUrl(provider, s.Get(AiProviders.BaseUrlKey)));
     }
 
     /// <summary>The spam scan works from the portal's own data; the rest talk to a model.</summary>
@@ -154,4 +160,5 @@ public sealed class AiOptions(SettingsService settings)
 }
 
 /// <param name="Setup">The setup's name, for the log line that says which provider answered or failed.</param>
-public sealed record AiProviderConfig(string Provider, string? Model, string ApiKey, string Setup = Setups.MainName);
+/// <param name="BaseUrl">A local server's address (<see cref="AiProviders.BaseUrl"/>); null for a hosted provider.</param>
+public sealed record AiProviderConfig(string Provider, string? Model, string ApiKey, string Setup = Setups.MainName, string? BaseUrl = null);

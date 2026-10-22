@@ -23,9 +23,10 @@ public class OpportunityFitTests
     [Fact]
     public void Every_key_is_unique_short_and_lower_case()
     {
-        var keys = OpportunityCategories.All.Select(c => c.Key).ToList();
+        // The shipped list; Admin → Categories holds an edited one to the same rules.
+        var keys = DefaultCategories.All.Select(c => c.Key).ToList();
         Assert.Equal(keys.Count, keys.Distinct(StringComparer.Ordinal).Count());
-        foreach (var c in OpportunityCategories.All)
+        foreach (var c in DefaultCategories.All)
         {
             Assert.Equal(c.Key, c.Key.ToLowerInvariant());
             Assert.InRange(c.Key.Length, 1, OpportunityCategories.MaxKey);
@@ -88,6 +89,55 @@ public class OpportunityFitTests
         Assert.NotNull(OpportunityCategories.PublishProblem(null));
         Assert.NotNull(OpportunityCategories.PublishProblem("nope"));
         Assert.Null(OpportunityCategories.PublishProblem("design"));
+    }
+
+    // ------------------------------------------------- a retired category
+
+    private static readonly Taxonomy WithHidden = new(
+    [
+        new("web", "Web development",
+            [new("frontend", "Front end", ["React"]), new("flash", "Flash sites", ["ActionScript"], Hidden: true)],
+            ["React"]),
+        new("games", "Games", [new("unity", "Unity", ["C#"])], ["Unity"], Hidden: true),
+        new("other", "Something else", [], []),
+    ]);
+
+    [Fact]
+    public void A_hidden_category_is_still_known_but_no_longer_offered()
+    {
+        // Its label, its board and its fit still need it; a picker and the
+        // model's list do not.
+        Assert.NotNull(WithHidden.Find("games"));
+        Assert.Equal(["web", "other"], WithHidden.Offered.Select(c => c.Key));
+        Assert.DoesNotContain("games", WithHidden.Keys);
+        Assert.Equal(3, WithHidden.All.Count);
+    }
+
+    [Fact]
+    public void Judging_is_decided_by_the_key_not_by_having_subcategories()
+    {
+        Assert.False(Taxonomy.Judgeable(WithHidden.Find("other")!));
+        Assert.True(Taxonomy.Judgeable(new OpportunityCategory("plain", "Plain", [], [])));
+    }
+
+    [Theory]
+    [InlineData("games", null, null, null, "Games is no longer offered — pick another category.")]
+    [InlineData("games", null, "games", null, null)]
+    [InlineData("games", "unity", "games", null, null)]
+    [InlineData("web", "flash", null, null, "Flash sites is no longer offered — pick another subcategory, or none.")]
+    [InlineData("web", "flash", "web", "flash", null)]
+    [InlineData("web", "flash", "games", "flash", "Flash sites is no longer offered — pick another subcategory, or none.")]
+    public void A_draft_keeps_a_retired_choice_it_had_but_cannot_make_a_new_one(
+        string category, string? sub, string? keptCategory, string? keptSub, string? expected) =>
+        Assert.Equal(expected, WithHidden.Problem(category, sub, keptCategory, keptSub));
+
+    [Fact]
+    public void Publishing_refuses_a_retired_category_or_subcategory()
+    {
+        Assert.Equal("Games is no longer offered — pick another category before publishing.", WithHidden.PublishProblem("games"));
+        Assert.NotNull(WithHidden.PublishProblem("web", "flash"));
+        Assert.NotNull(WithHidden.PublishProblem("web", "android"));
+        Assert.Null(WithHidden.PublishProblem("web", "frontend"));
     }
 
     // ------------------------------------ what the portal knows about work

@@ -71,6 +71,10 @@ public static class Procedures
     public static readonly Procedure SetupTestRecord = new("SetupTest_Record");
     public static readonly Procedure SetupTestPrune = new("SetupTest_Prune");
 
+    // ---- the kinds of work an administrator keeps
+    public static readonly Procedure CategoryList = new("Category_List");
+    public static readonly Procedure CategoryUsage = new("Category_Usage");
+
     // ---- AI
     public static readonly Procedure AiArtifact = new("Ai_Artifact");
     public static readonly Procedure AiModerated = new("Ai_Moderated");

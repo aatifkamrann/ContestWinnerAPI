@@ -136,6 +136,21 @@ public class DeliveryTests
     public void A_stranger_never_sees_them() =>
         Assert.False(Delivery.CanSeeFiles(false, false, false, OpportunityStatus.Reviewing));
 
+    [Fact]
+    public void A_claimed_milestones_files_open_to_the_client_while_entries_run()
+    {
+        // Claiming a milestone hands it in: its files open to the client to
+        // review. Untagged files, and a milestone not yet claimed, wait.
+        Assert.True(Delivery.CanSeeFile(false, isOwner: true, false, OpportunityStatus.Open, ofClaimedMilestone: true));
+        Assert.False(Delivery.CanSeeFile(false, isOwner: true, false, OpportunityStatus.Open, ofClaimedMilestone: false));
+        // From the deadline, everything, claimed or not.
+        Assert.True(Delivery.CanSeeFile(false, isOwner: true, false, OpportunityStatus.Reviewing, ofClaimedMilestone: false));
+        // Nobody else gains anything by the claim; a cancelled opportunity opens nothing.
+        Assert.False(Delivery.CanSeeFile(false, false, false, OpportunityStatus.Open, ofClaimedMilestone: true));
+        Assert.False(Delivery.CanSeeFile(false, isOwner: true, false, OpportunityStatus.Cancelled, ofClaimedMilestone: true));
+        Assert.False(Delivery.CanSeeClaimedFiles(isOwner: true, OpportunityStatus.Draft));
+    }
+
     // ------------------------------------------------------------ deleting
 
     [Fact]

@@ -17,8 +17,10 @@ namespace WinnersPortal.Services.Storage;
 ///
 /// The lifecycle mirrors the repository's: files land while the opportunity is
 /// open and freeze at the deadline; a file tagged to a milestone claims it
-/// first-come and the claim never comes off; the client opens the files
-/// from the deadline on, the entrant and an administrator at any time.
+/// first-come and the claim never comes off, and a later one tagged to it
+/// is an update; the client opens a claimed milestone's files from the
+/// claim and the rest from the deadline, the entrant and an administrator
+/// at any time.
 /// </summary>
 public sealed class SubmissionService(AppDbContext db, StorageService storage, ILiveBoard live)
 {
@@ -140,10 +142,11 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         entry.LastPushAtUtc = now;
         entry.PushCount += 1;
 
-        // The claim, first-come: the file keeps its milestone only when
-        // it is the one that claimed it. A later file tagged to the same
-        // milestone is stored plain, so the board and the file agree
-        // about which upload the claim points at.
+        // The claim, first-come: the first file tagged to a milestone claims
+        // it, and the claim points at that upload for good. A later file
+        // tagged to the same milestone is an update to it — after a request
+        // for changes, say — and keeps its tag: the client reviewing the
+        // milestone opens it beside the first, and the board reads Updated.
         var claimed = false;
         if (byMilestone && submission.MilestoneId is not null)
         {
@@ -161,11 +164,7 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         {
             var already = await db.Checkpoints.AnyAsync(
                 cp => cp.EntryId == entry.Id && cp.MilestoneId == milestoneId, ct);
-            if (already)
-            {
-                submission.MilestoneId = null;
-            }
-            else
+            if (!already)
             {
                 db.Checkpoints.Add(new Checkpoint
                 {
@@ -188,11 +187,13 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         catch (DbUpdateException e) when (DbErrors.IsUniqueViolation(e))
         {
             // Two uploads raced for one milestone; the other won. This
-            // file is kept, just not as the claim.
+            // file is kept, just not as the claim: paid by milestone it is
+            // stored plain, as a refused hand-in is; competitive it is an
+            // update to the milestone the other one claimed.
             db.ChangeTracker.Entries<Checkpoint>()
                 .Where(c => c.State == EntityState.Added).ToList()
                 .ForEach(c => c.State = EntityState.Detached);
-            submission.MilestoneId = null;
+            if (byMilestone) submission.MilestoneId = null;
             claimed = false;
             await db.SaveChangesAsync(ct);
         }
@@ -239,16 +240,21 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
         var isOwner = entry is not null && entry.ClientId == viewerId;
         var isAdmin = principal.IsInRole(Roles.Admin);
         if (entry is null || !(isEntrant || isOwner || isAdmin)) return Outcome.NotFound();
-        // The owner, before the deadline: told why, not shown a 404 —
-        // the page asks on their behalf and needs the reason to print.
-        if (!Delivery.CanSeeFiles(isEntrant, isOwner, isAdmin, entry.OpportunityStatus))
+        // The owner, before the deadline: the files of the milestones claimed
+        // so far, or — none yet — told why, not shown a 404: the page asks on
+        // their behalf and needs the reason to print.
+        var all = Delivery.CanSeeFiles(isEntrant, isOwner, isAdmin, entry.OpportunityStatus);
+        if (!all && !Delivery.CanSeeClaimedFiles(isOwner, entry.OpportunityStatus))
             return Outcome.Conflict("Entrants' files open to you when the deadline passes.");
 
         var items = await db.Submissions.AsNoTracking()
             .Where(s => s.EntryId == id && s.UploadedAtUtc != null)
+            .Where(s => all || (s.MilestoneId != null && s.Entry!.Checkpoints.Any(cp => cp.MilestoneId == s.MilestoneId)))
             .OrderBy(s => s.UploadedAtUtc)
             .Include(s => s.Milestone)
             .ToListAsync(ct);
+        if (!all && items.Count == 0)
+            return Outcome.Conflict("A milestone's files open to you once it is claimed; the rest when the deadline passes.");
         return Outcome.Ok(new SubmissionListResponse
         {
             Items = items.Select(s => Dto(s)),
@@ -307,7 +313,8 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
     /// <summary>
     /// The delivery rule for opening an entrant's file, shared by the download
     /// and the preview: a confirmed upload, opened by its entrant, by an
-    /// administrator, or by the client once the work is frozen — the same
+    /// administrator, or by the client once the work is frozen (a claimed
+    /// milestone's from the claim, <see cref="Delivery.CanSeeClaimedFiles"/>) — the same
     /// null for a file that is not theirs to see as for one that is missing.
     /// </summary>
     private static async Task<ReadableFile?> ReadableAsync(
@@ -320,10 +327,11 @@ public sealed class SubmissionService(AppDbContext db, StorageService storage, I
                 s.StorageSetup, s.StorageKey, s.FileName, s.ContentType, s.SizeBytes,
                 s.Entry!.FreelancerId,
                 s.Entry.Opportunity!.ClientId, OpportunityStatus = s.Entry.Opportunity.Status,
+                Claimed = s.MilestoneId != null && s.Entry.Checkpoints.Any(cp => cp.MilestoneId == s.MilestoneId),
             })
             .SingleOrDefaultAsync(ct);
         return row is not null
-            && Delivery.CanSeeFiles(row.FreelancerId == viewerId, row.ClientId == viewerId, isAdmin, row.OpportunityStatus)
+            && Delivery.CanSeeFile(row.FreelancerId == viewerId, row.ClientId == viewerId, isAdmin, row.OpportunityStatus, row.Claimed)
             ? new ReadableFile(row.StorageSetup, row.StorageKey, row.FileName, row.ContentType, row.SizeBytes)
             : null;
     }

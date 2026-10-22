@@ -17,10 +17,24 @@ public sealed record EvalCase(
     string? Note,
     JsonElement Input,
     Expectation Expect,
-    string File)
+    string File,
+    CaseAnswers? Answers = null)
 {
     public string Id => $"{Slug}/{Name}";
 }
+
+/// <summary>
+/// A case's own sample answers, written by hand: one good answer that must
+/// pass every check, and bad ones that must fail, each with the words its
+/// failure must name. They prove with no model call that the checks can be
+/// met and that they catch what the case exists for — a check no answer can
+/// pass, or one that passes anything, is found at build time. The good
+/// answers are also what <c>--replay</c> feeds the whole tool.
+/// </summary>
+public sealed record CaseAnswers(string Good, IReadOnlyList<BadAnswer> Bad);
+
+/// <summary>A wrong answer, the words some failure must contain, and why it is wrong.</summary>
+public sealed record BadAnswer(string Text, IReadOnlyList<string> Fails, string? Why);
 
 /// <summary>
 /// What a case expects of the answer, beyond the validator every answer
@@ -33,7 +47,7 @@ public sealed class Expectation
 {
     public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
     {
-        "category", "subcategory", "confident", "minCount", "maxCount", "mentionsAny", "forbidWords", "forbidPattern", "judge",
+        "category", "subcategory", "confident", "categories", "notCategories", "minCount", "maxCount", "mentionsAny", "forbidWords", "forbidPattern", "judge",
     };
 
     /// <summary>The category key the answer must name (categorise).</summary>
@@ -45,6 +59,12 @@ public sealed class Expectation
     public string? Subcategory { get; init; }
 
     public bool? Confident { get; init; }
+
+    /// <summary>Category keys the answer's list must hold (work-kinds).</summary>
+    public IReadOnlyList<string> Categories { get; init; } = [];
+
+    /// <summary>Category keys the answer's list must not hold (work-kinds).</summary>
+    public IReadOnlyList<string> NotCategories { get; init; } = [];
 
     /// <summary>Bounds on the feature's list — milestones, improvements, review focus.</summary>
     public int? MinCount { get; init; }
@@ -80,6 +100,10 @@ public sealed class Expectation
                 }
                 if (p.Name == "forbidWords") forbid.AddRange(Strings(p.Value, problems, "expect.forbidWords"));
                 else merged[p.Name] = p.Value;
+                if (p.Name is "categories" or "notCategories")
+                    foreach (var key in Strings(p.Value, problems, "expect." + p.Name))
+                        if (!WinnersPortal.Services.Opportunities.OpportunityCategories.Keys.Contains(key))
+                            problems.Add($"expect.{p.Name} names \"{key}\", which is not a category key.");
             }
         }
 
@@ -120,6 +144,8 @@ public sealed class Expectation
             SubcategoryGiven = merged.ContainsKey("subcategory"),
             Subcategory = Str("subcategory"),
             Confident = Bool("confident"),
+            Categories = merged.TryGetValue("categories", out var cats) ? Strings(cats, [], "") : [],
+            NotCategories = merged.TryGetValue("notCategories", out var notCats) ? Strings(notCats, [], "") : [],
             MinCount = Int("minCount"),
             MaxCount = Int("maxCount"),
             MentionsAny = groups,
@@ -199,11 +225,14 @@ public static class EvalCases
                     own.Add("has no input object.");
                 r.TryGetProperty("expect", out var expect);
                 var expectation = Expectation.Parse(defaults, expect.ValueKind == JsonValueKind.Undefined ? null : expect, own);
+                var answers = r.TryGetProperty("answers", out var a) ? ParseAnswers(a, own) : null;
+                if (answers is null && a.ValueKind == JsonValueKind.Undefined)
+                    own.Add("has no answers: one good answer and at least one bad one (evals/README.md, \"Sample answers\").");
                 foreach (var p in r.EnumerateObject())
-                    if (p.Name is not ("name" or "note" or "input" or "expect"))
-                        own.Add($"{p.Name} is not part of a case (name, note, input, expect).");
+                    if (p.Name is not ("name" or "note" or "input" or "expect" or "answers"))
+                        own.Add($"{p.Name} is not part of a case (name, note, input, expect, answers).");
 
-                if (own.Count == 0)
+                if (input.ValueKind == JsonValueKind.Object)
                 {
                     try
                     {
@@ -223,11 +252,81 @@ public static class EvalCases
                 cases.Add(new EvalCase(
                     feature, slug, caseName,
                     r.TryGetProperty("note", out var note) && note.ValueKind == JsonValueKind.String ? note.GetString() : null,
-                    input.Clone(), expectation, file));
+                    input.Clone(), expectation, file, answers));
             }
         }
         if (problems.Count > 0) throw new EvalCaseException(problems);
         return cases;
+    }
+
+    /// <summary>
+    /// <c>{"good": answer, "bad": [{"answer": answer, "fails": [words], "why": text}]}</c>,
+    /// where an answer is the model's JSON as an object, or a string holding
+    /// raw text for an answer that is not JSON at all.
+    /// </summary>
+    private static CaseAnswers? ParseAnswers(JsonElement e, List<string> problems)
+    {
+        if (e.ValueKind != JsonValueKind.Object)
+        {
+            problems.Add("answers must be an object with good and bad.");
+            return null;
+        }
+        foreach (var p in e.EnumerateObject())
+            if (p.Name is not ("good" or "bad"))
+                problems.Add($"answers.{p.Name} is not part of the answers (good, bad).");
+
+        string? good = e.TryGetProperty("good", out var g) ? AnswerText(g) : null;
+        if (good is null) problems.Add("answers.good is missing: the answer that must pass every check.");
+
+        var bad = new List<BadAnswer>();
+        if (!e.TryGetProperty("bad", out var list) || list.ValueKind != JsonValueKind.Array || list.GetArrayLength() == 0)
+            problems.Add("answers.bad must list at least one answer the checks must refuse.");
+        else
+        {
+            var n = 0;
+            foreach (var item in list.EnumerateArray())
+            {
+                n++;
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    problems.Add($"answers.bad[{n}] must be an object with answer and fails.");
+                    continue;
+                }
+                foreach (var p in item.EnumerateObject())
+                    if (p.Name is not ("answer" or "fails" or "why"))
+                        problems.Add($"answers.bad[{n}].{p.Name} is not part of a bad answer (answer, fails, why).");
+                var text = item.TryGetProperty("answer", out var ans) ? AnswerText(ans) : null;
+                if (text is null) problems.Add($"answers.bad[{n}].answer is missing.");
+                var fails = item.TryGetProperty("fails", out var f) ? Strings(f, problems, $"answers.bad[{n}].fails") : [];
+                if (fails.Count == 0) problems.Add($"answers.bad[{n}].fails must name the words its failure says.");
+                if (text is not null && fails.Count > 0)
+                    bad.Add(new BadAnswer(text, fails,
+                        item.TryGetProperty("why", out var why) && why.ValueKind == JsonValueKind.String ? why.GetString() : null));
+            }
+        }
+        return good is null || bad.Count == 0 ? null : new CaseAnswers(good, bad);
+    }
+
+    private static string? AnswerText(JsonElement e) => e.ValueKind switch
+    {
+        JsonValueKind.Object or JsonValueKind.Array => e.GetRawText(),
+        JsonValueKind.String => e.GetString(),
+        _ => null,
+    };
+
+    private static List<string> Strings(JsonElement e, List<string> problems, string where)
+    {
+        if (e.ValueKind != JsonValueKind.Array)
+        {
+            problems.Add($"{where} must be a list of words.");
+            return [];
+        }
+        var list = new List<string>();
+        foreach (var item in e.EnumerateArray())
+            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                list.Add(item.GetString()!);
+            else problems.Add($"{where} holds something that is not a word.");
+        return list;
     }
 
     private static JsonElement? ParseFile(string file, List<string> problems)

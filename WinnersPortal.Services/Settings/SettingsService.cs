@@ -258,6 +258,23 @@ public sealed class SettingsService
             if (WebOrigin.PairProblem(webUrl, apiUrl) is { } pair)
                 throw new SettingsValidationException(pair);
         }
+        // An AI setup's key and address likewise, as each setup will stand:
+        // a key is never kept beside a plain-http address on another machine.
+        foreach (var setupId in accepted.Keys.Select(AiSetupOf).OfType<string>().Distinct())
+        {
+            var current = await SetupAsync(Setups.Ai, setupId, ct);
+            string? After(string field) =>
+                accepted.TryGetValue(Setups.FieldKey(field, setupId), out var v) ? v : current?.Get(field);
+            if (Ai.AiProviders.KeyProblem(After("ai.provider"), After(Ai.AiProviders.BaseUrlKey), After("ai.apiKey")) is { } keyProblem)
+                throw new SettingsValidationException(keyProblem);
+        }
+        if (accepted.Keys.Any(k => k is Ai.EvalSettings.ProviderKey or Ai.EvalSettings.BaseUrlKey or Ai.EvalSettings.ApiKeyKey))
+        {
+            async Task<string?> After(string key) => accepted.TryGetValue(key, out var v) ? v : await GetAsync(key, ct);
+            if (Ai.AiProviders.KeyProblem(await After(Ai.EvalSettings.ProviderKey), await After(Ai.EvalSettings.BaseUrlKey),
+                    await After(Ai.EvalSettings.ApiKeyKey)) is { } evalKeyProblem)
+                throw new SettingsValidationException(evalKeyProblem);
+        }
         await SetupChangesAsync(accepted, ct);
         if (accepted.Count == 0) return;
 
@@ -322,6 +339,12 @@ public sealed class SettingsService
     public static string? Entered(SettingDefinition def, string? value) =>
         def.Trimmed ? value?.Trim() : value;
 
+    /// <summary>The AI setup a key belongs to, or null for a key outside one.</summary>
+    private static string? AiSetupOf(string key) =>
+        Setups.Ai.Fields.Contains(key) ? Setups.MainId
+        : Setups.ParseScoped(key) is { } scoped && Setups.Ai.Fields.Contains(scoped.FieldKey) ? scoped.SetupId
+        : null;
+
     /// <summary>
     /// Why a value cannot be stored under a setting, or null when it can: the
     /// few settings with a shape. Pure, so the setup wizard can refuse a value
@@ -360,7 +383,8 @@ public sealed class SettingsService
             ?? Auth.JwtSettings.Problem(def.Key, value)
             ?? RedisSettings.Problem(def.Key, value)
             ?? Preview.PreviewHost.Problem(def.Key, value)
-            ?? Ai.AiLimits.Problem(def.Key, value);
+            ?? Ai.AiLimits.Problem(def.Key, value)
+            ?? Ai.AiProviders.Problem(def.Key, value);
     }
 
     /// <summary>

@@ -9,17 +9,20 @@ namespace WinnersPortal.Api.Opportunities;
 [ApiController]
 public sealed class MilestonePaymentController(MilestonePaymentService payments) : ControllerBase
 {
-    // The client's three answers to a milestone handed in.
+    // The review of a milestone handed in: the client's, or an
+    // administrator's on their behalf. The service tells the two apart and
+    // answers anyone else with not found.
     [HttpPost("api/checkpoints/{id:guid}/approve")]
-    [Authorize(Policy = "client")]
-    public async Task<IResult> PostCheckpointsApprove(Guid id, CancellationToken ct) =>
-        (await payments.ApproveAsync(id, User, ct)).ToResult();
+    [Authorize]
+    public async Task<IResult> PostCheckpointsApprove(Guid id, MilestoneReviewRequest request, CancellationToken ct) =>
+        (await payments.ApproveAsync(id, request, User, ct)).ToResult();
 
     [HttpPost("api/checkpoints/{id:guid}/changes")]
-    [Authorize(Policy = "client")]
-    public async Task<IResult> PostCheckpointsChanges(Guid id, MilestoneChangesRequest request, CancellationToken ct) =>
+    [Authorize]
+    public async Task<IResult> PostCheckpointsChanges(Guid id, MilestoneReviewRequest request, CancellationToken ct) =>
         (await payments.RequestChangesAsync(id, request, User, ct)).ToResult();
 
+    // Paying is the client's alone: it says their money moved.
     [HttpPost("api/checkpoints/{id:guid}/paid")]
     [Authorize(Policy = "client")]
     public async Task<IResult> PostCheckpointsPaid(Guid id, CancellationToken ct) =>

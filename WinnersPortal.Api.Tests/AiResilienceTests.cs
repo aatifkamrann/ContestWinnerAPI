@@ -124,6 +124,29 @@ public class AiResilienceTests
     }
 
     [Fact]
+    public async Task A_timed_out_attempt_to_a_server_with_one_queue_is_not_tried_again_but_a_503_is()
+    {
+        // The shared box may still be working on the abandoned attempt; a retry would wait behind it.
+        var (slow, slowProvider, _) = Wired(Limits(timeoutSeconds: 1, retries: 2), async (_, _, ct) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+            return Status(HttpStatusCode.OK, Answer);
+        });
+        var e = await Assert.ThrowsAsync<AiProviderException>(() =>
+            slow.CompleteAsync("ollama", "llama3.1:8b", "", "sys", "user", AiOutputs.PingSchema, CancellationToken.None));
+        Assert.Equal(AiFailure.Timeout, e.Failure);
+        Assert.Equal(1, slowProvider.Attempts);
+
+        // A refusal before it ran is another matter: nothing is waiting there.
+        const string chat = """{"choices":[{"message":{"content":"{\"ok\":true}"},"finish_reason":"stop"}]}""";
+        var (busy, busyProvider, _) = Wired(Limits(retries: 2), (attempt, _, _) => Task.FromResult(
+            attempt < 2 ? Status(HttpStatusCode.ServiceUnavailable, """{"error":"loading model"}""", retryAfterSeconds: 0) : Status(HttpStatusCode.OK, chat)));
+        var answer = await busy.CompleteAsync("ollama", "llama3.1:8b", "", "sys", "user", AiOutputs.PingSchema, CancellationToken.None);
+        Assert.Equal("{\"ok\":true}", answer.Text);
+        Assert.Equal(2, busyProvider.Attempts);
+    }
+
+    [Fact]
     public async Task Half_a_minutes_failures_pause_the_calls_and_the_pause_is_named()
     {
         // Retries off, so each call is one attempt; four failures trip the breaker.

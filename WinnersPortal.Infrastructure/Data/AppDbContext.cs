@@ -11,6 +11,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
     public DbSet<Setting> Settings => Set<Setting>();
     public DbSet<SettingAudit> SettingAudits => Set<SettingAudit>();
     public DbSet<SetupTest> SetupTests => Set<SetupTest>();
+    public DbSet<Category> Categories => Set<Category>();
+    public DbSet<Subcategory> Subcategories => Set<Subcategory>();
     public DbSet<ActivityEvent> ActivityEvents => Set<ActivityEvent>();
     public DbSet<User> Users => Set<User>();
     public DbSet<UserAvatar> UserAvatars => Set<UserAvatar>();
@@ -24,6 +26,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
     public DbSet<Entry> Entries => Set<Entry>();
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
+    public DbSet<MilestoneReview> MilestoneReviews => Set<MilestoneReview>();
     public DbSet<Preview> Previews => Set<Preview>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
     public DbSet<IdentityVerification> IdentityVerifications => Set<IdentityVerification>();
@@ -64,7 +67,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
     /// <summary>Dapper on this context's connection and transaction; see <see cref="Data.Sql"/>.</summary>
     public Sql Sql => _sql ??= new Sql(this, slow);
 
-    // The eleven lines where the two dialects part: the Postgres branch is
+    // The thirteen lines where the two dialects part: the Postgres branch is
     // the model as it always was, the SQL Server branch its equivalent.
     // Arrays and JSON documents are nvarchar(max) holding their JSON on
     // SQL Server — not the json type 2025 introduced, so that 2022 runs
@@ -100,6 +103,29 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
             e.Property(x => x.Detail).HasMaxLength(SetupTest.MaxDetail);
             e.Property(x => x.Fingerprint).HasMaxLength(512);
             e.Property(x => x.TestedBy).HasMaxLength(320);
+        });
+
+        // The kinds of work an administrator keeps. Keys are what the
+        // opportunities and profiles store, with no foreign key back here:
+        // a key is fixed once created, and one in use is hidden, not removed.
+        b.Entity<Category>(e =>
+        {
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(Category.MaxKey);
+            e.Property(x => x.Label).HasMaxLength(Category.MaxLabel);
+            e.Property(x => x.Skills).HasColumnType(Array(sql, "text[]"));
+            e.Property(x => x.UpdatedBy).HasMaxLength(Category.MaxUpdatedBy);
+            e.HasMany(x => x.Subcategories).WithOne()
+                .HasForeignKey(x => x.CategoryKey).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Subcategory>(e =>
+        {
+            e.HasKey(x => new { x.CategoryKey, x.Key });
+            e.Property(x => x.CategoryKey).HasMaxLength(Category.MaxKey);
+            e.Property(x => x.Key).HasMaxLength(Category.MaxKey);
+            e.Property(x => x.Label).HasMaxLength(Category.MaxLabel);
+            e.Property(x => x.Skills).HasColumnType(Array(sql, "text[]"));
         });
 
         b.Entity<ActivityEvent>(e =>
@@ -414,6 +440,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, SlowQue
             // A milestone is claimed once per entry; the first claim wins and
             // a redelivered webhook is a constraint hit, not a duplicate row.
             e.HasIndex(x => new { x.EntryId, x.MilestoneId }).IsUnique();
+        });
+
+        b.Entity<MilestoneReview>(e =>
+        {
+            e.Property(x => x.Note).HasMaxLength(MilestoneReview.MaxNote);
+            e.Property(x => x.Advice).HasMaxLength(MilestoneReview.MaxAdvice);
+            // The board reads a claim's reviews oldest first; they go with
+            // the claim, which goes with the entry.
+            e.HasIndex(x => new { x.CheckpointId, x.AtUtc });
+            e.HasOne(x => x.Checkpoint).WithMany()
+                .HasForeignKey(x => x.CheckpointId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Preview>(e =>

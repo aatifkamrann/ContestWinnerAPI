@@ -75,8 +75,118 @@ public static class EvalChecks
                 if (focus is < 2 or > 4) yield return $"reviewFocus has {focus} starting points; the prompt asks for 2 to 4";
                 break;
             }
+            case AiFeature.BriefCoach:
+            {
+                var flags = root.GetProperty("flags").GetArrayLength();
+                if (flags > 8) yield return $"flags has {flags} items; the prompt allows at most 8";
+                break;
+            }
+            case AiFeature.RequirementsSuggestion:
+                foreach (var r in root.GetProperty("requirements").EnumerateArray())
+                {
+                    var title = Str(r, "title") ?? "";
+                    if (Words(title) > 3) yield return $"requirement \"{title}\" is titled in {Words(title)} words; the prompt asks for one to three";
+                    if ((Str(r, "detail") ?? "").Length >= 120) yield return $"requirement \"{title}\" has a detail of 120 characters or more";
+                }
+                break;
+            case AiFeature.CriteriaSuggestion:
+                foreach (var r in root.GetProperty("criteria").EnumerateArray())
+                {
+                    var title = Str(r, "title") ?? "";
+                    if (Words(title) > 4) yield return $"criterion \"{title}\" is titled in {Words(title)} words; the prompt asks for one to four";
+                    if ((Str(r, "description") ?? "").Length >= 120) yield return $"criterion \"{title}\" has a description of 120 characters or more";
+                }
+                break;
+            case AiFeature.SeoMetadata:
+            {
+                var title = Str(root, "title") ?? "";
+                var description = Str(root, "description") ?? "";
+                if (title.Length > 60) yield return $"the title is {title.Length} characters; the prompt allows 60";
+                if (description.Length > 155) yield return $"the description is {description.Length} characters; the prompt allows 155";
+                break;
+            }
+            case AiFeature.ProfileSummary:
+            {
+                var summary = Str(root, "summary") ?? "";
+                if (summary.Length >= 600) yield return $"the summary is {summary.Length} characters; the prompt asks for under 600";
+                var sentences = Sentences(summary);
+                if (sentences is < 2 or > 4) yield return $"the summary has {sentences} sentences; the prompt asks for 2 to 4";
+                break;
+            }
+            case AiFeature.ProjectApproach:
+            {
+                var approach = Str(root, "approach") ?? "";
+                if (approach.Length is < 400 or > 900) yield return $"the approach is {approach.Length} characters; the prompt asks for 400 to 900";
+                if (Regex.IsMatch(approach, @"(?m)^\s*#")) yield return "the approach carries a heading; the prompt asks for none";
+                break;
+            }
+            case AiFeature.ApplicationEvaluation:
+            {
+                var (strengths, risks) = EvalFeatures.EvaluationIds(c.Input);
+                foreach (var f in CopiedBack("strength", strengths, Ids(root, "strengths"))) yield return f;
+                foreach (var f in CopiedBack("risk", risks, Ids(root, "risks"))) yield return f;
+                if (Texts(root).Any(t => Regex.IsMatch(t, @"\d|%")))
+                    yield return "the evaluation's words carry a figure; the figures are the portal's arithmetic";
+                if (Str(root, "note") is null) yield return "the evaluation has no note";
+                break;
+            }
+            case AiFeature.ProgressNarrative:
+            {
+                foreach (var f in Labels(c, root)) yield return f;
+                var sentences = Sentences(Str(root, "narrative") ?? "");
+                if (sentences is < 2 or > 4) yield return $"the narrative has {sentences} sentences; the prompt asks for 2 to 4";
+                break;
+            }
+            case AiFeature.StandingNotes:
+            {
+                foreach (var f in Labels(c, root)) yield return f;
+                var rows = root.GetProperty("entrants").EnumerateArray().ToList();
+                var got = rows.Select(r => Str(r, "entryId") ?? "").ToList();
+                foreach (var f in CopiedBack("entrant", EvalFeatures.StandingIds(c.Input), got.ToHashSet(StringComparer.OrdinalIgnoreCase)))
+                    yield return f;
+                foreach (var id in got.GroupBy(i => i, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+                    yield return $"entrant {id.Key} has {id.Count()} notes; the prompt asks for one each";
+                foreach (var r in rows.Where(r => !r.TryGetProperty("check", out var k) || k.GetArrayLength() == 0))
+                    yield return $"entrant {Str(r, "entryId")} has nothing to check; the prompt asks for 1 to 3";
+                if (Str(root, "summary") is null) yield return "the notes have no summary of the board";
+                break;
+            }
         }
     }
+
+    /// <summary>Every id handed in comes back, and none comes back that was not.</summary>
+    private static IEnumerable<string> CopiedBack(string what, IReadOnlyList<string> expected, HashSet<string> got)
+    {
+        foreach (var id in expected.Where(id => !got.Contains(id)))
+            yield return $"{what} {id} was handed in and came back without words";
+        foreach (var id in got.Where(id => !expected.Contains(id, StringComparer.OrdinalIgnoreCase)))
+            yield return $"{what} {id} was not handed in — an id was invented";
+    }
+
+    private static readonly Regex EntrantLabel = new(@"(?<![\p{L}\p{N}])E[1-9]\d{0,2}(?![\p{L}\p{N}])");
+
+    /// <summary>The model may name entrants only by the labels it was handed; E9 on a board of three is an invented entrant.</summary>
+    private static IEnumerable<string> Labels(EvalCase c, JsonElement root)
+    {
+        var handed = EvalFeatures.EntrantLabels(c.Feature, c.Input);
+        foreach (var label in Texts(root).SelectMany(t => EntrantLabel.Matches(t)).Select(m => m.Value).Distinct())
+            if (int.Parse(label[1..]) > handed)
+                yield return $"entrant {label} was not handed in — the board has {handed}";
+    }
+
+    /// <summary>
+    /// Sentences as a reader counts them: an end of sentence followed by a
+    /// capital or the end of the text, plus a last one left without a stop.
+    /// "e.g. delivery" and "Next.js" end nothing.
+    /// </summary>
+    public static int Sentences(string text)
+    {
+        var t = text.Trim();
+        var ends = Regex.Matches(t, @"[.!?](?=\s+[\p{Lu}\p{N}""“(]|[""”)]*$)").Count;
+        return ends + (t.Length > 0 && !Regex.IsMatch(t, @"[.!?][""”)]*$") ? 1 : 0);
+    }
+
+    private static int Words(string text) => text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
     /// <summary>The case's expectations against the answer.</summary>
     public static IEnumerable<string> Expected(Expectation e, AiFeature feature, JsonElement root)
@@ -97,6 +207,17 @@ public static class EvalChecks
         {
             var got = root.TryGetProperty("confident", out var cv) && cv.ValueKind == JsonValueKind.True;
             if (got != confident) yield return $"confident is {got.ToString().ToLowerInvariant()}, expected {confident.ToString().ToLowerInvariant()}";
+        }
+
+        if (e.Categories.Count > 0 || e.NotCategories.Count > 0)
+        {
+            var got = root.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array
+                ? cats.EnumerateArray().Select(v => v.GetString() ?? "").ToHashSet(StringComparer.Ordinal)
+                : [];
+            foreach (var key in e.Categories.Where(k => !got.Contains(k)))
+                yield return $"categories leaves out {key}";
+            foreach (var key in e.NotCategories.Where(got.Contains))
+                yield return $"categories names {key}, which this profile does not cover";
         }
 
         if (e.MinCount is not null || e.MaxCount is not null)
@@ -132,10 +253,19 @@ public static class EvalChecks
         AiFeature.MilestoneExtraction => "milestones",
         AiFeature.ProfileReview => "improvements",
         AiFeature.EntryDigest => "reviewFocus",
+        AiFeature.BriefCoach => "flags",
+        AiFeature.RequirementsSuggestion => "requirements",
+        AiFeature.CriteriaSuggestion => "criteria",
+        AiFeature.RecommendedMatching => "categories",
+        AiFeature.StandingNotes => "entrants",
         _ => null,
     };
 
-    /// <summary>Every string value in the answer, wherever it sits.</summary>
+    /// <summary>
+    /// Every string value in the answer, wherever it sits, except the ids it
+    /// copies back: an id is the portal's own label, not the model's words,
+    /// so "about" or "skill:docker" must never satisfy a word check.
+    /// </summary>
     public static IEnumerable<string> Texts(JsonElement e)
     {
         switch (e.ValueKind)
@@ -149,7 +279,8 @@ public static class EvalChecks
                 break;
             case JsonValueKind.Object:
                 foreach (var p in e.EnumerateObject())
-                    foreach (var t in Texts(p.Value)) yield return t;
+                    if (p.Name is not ("id" or "entryId"))
+                        foreach (var t in Texts(p.Value)) yield return t;
                 break;
         }
     }

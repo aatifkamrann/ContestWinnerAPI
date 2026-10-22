@@ -218,6 +218,8 @@ public static class SettingsRegistry
         new("ai.enabled", "ai", "Enable AI automation", Default: "false", HelpRequired: true, IsBoolean: true),
         new("ai.provider", "ai", "Model provider", Default: AiProviders.Gemini, HelpRequired: true,
             Choices: [.. AiProviders.Choices.Select(c => new SettingChoice(c.Value, c.Label))]),
+        // A local server's address; a hosted provider's is fixed in code.
+        new(AiProviders.BaseUrlKey, "ai", "Server address", HelpRequired: true),
         new("ai.apiKey", "ai", "Provider API key", IsSecret: true, HelpRequired: true),
         new("ai.model", "ai", "Model", HelpRequired: true),
         new(AiOptions.StandbyKey, "ai", "Standby for the active setup", Default: "false", HelpRequired: true, IsBoolean: true),
@@ -270,6 +272,7 @@ public static class SettingsRegistry
         new(Ai.EvalSettings.EnabledKey, Ai.EvalSettings.Group, "Enable AI evals", Default: "false", HelpRequired: true, IsBoolean: true),
         new(Ai.EvalSettings.ProviderKey, Ai.EvalSettings.Group, "Eval provider", HelpRequired: true,
             Choices: [.. AiProviders.Choices.Select(c => new SettingChoice(c.Value, c.Label))]),
+        new(Ai.EvalSettings.BaseUrlKey, Ai.EvalSettings.Group, "Eval server address", HelpRequired: true),
         new(Ai.EvalSettings.ApiKeyKey, Ai.EvalSettings.Group, "Eval API key", IsSecret: true, HelpRequired: true,
             Trimmed: true),
         // The run’s own ceiling and timeout, read by the tool the same way.

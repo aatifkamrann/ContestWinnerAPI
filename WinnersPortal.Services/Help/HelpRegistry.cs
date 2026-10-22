@@ -24,7 +24,9 @@ public static class HelpRegistry
     /// <summary>The connection badge, as each connection's setups topic ends.</summary>
     private const string SetupBadge =
         "The answer stays on the setup's card as its connection badge — Connected or Connection failed, for every "
-        + "administrator — until a value of the setup is saved differently, when it reads Changed since test.";
+        + "administrator — until a value of the setup is saved differently, when it reads Changed since test. "
+        + "Under the test button the card keeps that test's own words in full, with when it ran and who ran it, so "
+        + "the reason a test failed is still there for whoever opens the card next.";
 
     public static readonly IReadOnlyList<HelpTopic> All =
     [
@@ -85,15 +87,36 @@ public static class HelpRegistry
                  + "provider outage is generating noise. It is safe to toggle at any time."),
 
         new("settings.ai.provider",
-            "Which model provider handles language tasks: Google Gemini, Anthropic Claude or OpenAI.",
+            "Which model provider handles language tasks: Google Gemini, Anthropic Claude, OpenAI, or a model server of your own.",
             "Choose the service used for text generation — entry digests, milestone extraction, brief coaching, "
             + "narratives, and SEO drafts. The spam scan never uses a provider; it runs on this server.\n\n"
             + "Gemini has a free tier; Anthropic and OpenAI answer only once the account holds credit. Every AI "
             + "call here is a background job rather than something a visitor waits on, so modest rate limits are "
-            + "fine. Verify the provider's current pricing and free-tier limits before you rely on them; they change.",
+            + "fine. Verify the provider's current pricing and free-tier limits before you rely on them; they change.\n\n"
+            + "\"Ollama or another OpenAI-compatible server\" is a model running on a machine you run: Ollama, LM Studio, "
+            + "vLLM or llama.cpp, or a gateway in front of one. Give its Server address. Nothing is billed and nothing "
+            + "leaves your network unless the address does. A small model there is fine for sorting work into "
+            + "categories and weaker at drafting that must stick to the facts — run the AI evals against it before "
+            + "you rely on it for a feature.",
             Why: "Switching provider changes cost, rate limits, and where your data is processed. Existing generated "
                  + "content is kept — only future jobs use the new provider.",
             Example: "Google Gemini"),
+
+        new("settings." + Ai.AiProviders.BaseUrlKey,
+            "Where your own model server answers: the address before /chat/completions. Only for a server of your own.",
+            "The address the portal sends this setup's calls to, ending in /v1 for Ollama and most others: "
+            + "http://localhost:11434/v1 for Ollama on this machine (blank means that), http://ollama:11434/v1 for an "
+            + "Ollama container beside the portal's, or the https address of a gateway in front of a shared one.\n\n"
+            + "A key is sent only over https or to this machine. A server inside your own network needs none; a "
+            + "gateway that asks for one gets the key saved below. A key beside a plain-http address on another "
+            + "machine is refused at the save.\n\n"
+            + "The server has one queue for everyone who calls it, so a call that timed out is not tried again there "
+            + "— it may still be running. A standby setup is asked instead, if one is marked; otherwise the job tries "
+            + "again later. A model on a processor rather than a graphics card takes twenty seconds to a minute a call, "
+            + "and the first call waits while the model loads: raise the call timeout to suit.",
+            Why: "This is the one place a local model is reached from. An address nothing answers at fails every AI "
+                 + "job with \"not available\", and the first test says so.",
+            Example: "http://localhost:11434/v1"),
 
         new("settings.ai.apiKey",
             "API key for the selected provider. Stored encrypted and never shown again.",
@@ -103,7 +126,9 @@ public static class HelpRegistry
             + "gives no API access, and neither does a Claude or Gemini app subscription. Create the key at the "
             + "provider's developer console (platform.openai.com, console.anthropic.com, Google AI Studio) and, "
             + "for OpenAI and Anthropic, add credit there before the first test.\n\n"
-            + "To replace a key, type the new one over the field. To remove it, use the clear button.",
+            + "To replace a key, type the new one over the field. To remove it, use the clear button.\n\n"
+            + "Your own model server needs no key. Leave it blank unless a gateway in front of the server asks for "
+            + "one; the key then travels only over https.",
             Why: "Without a valid key every language-based AI feature fails silently into its non-AI fallback. Treat "
                  + "the key as a secret — anyone holding it can spend your provider credit."),
 
@@ -111,7 +136,7 @@ public static class HelpRegistry
             "Model identifier passed to the provider. Leave blank to use the recommended default.",
             "Set this only if you have a reason to pin a specific model — a newer release, or one with a larger "
             + "context window for long briefs. Blank resolves to gemini-3.6-flash, claude-sonnet-5-5 or gpt-5.5, "
-            + "by provider.\n\nThis is the setup's own model. Model per feature, under the switches and limits, names a "
+            + "by provider, and to llama3.1:8b on your own server — which must already hold the model (ollama pull).\n\nThis is the setup's own model. Model per feature, under the switches and limits, names a "
             + "different one for a feature — a quick model for the quick inline tools — and wins for that feature on "
             + "the active setup.",
             Why: "An identifier the provider does not recognise makes every AI job fail. Blank is the safe choice.",
@@ -385,6 +410,19 @@ public static class HelpRegistry
             + "that is the one way round it, and it shows in the shell's history.",
             Why: "The eval key is a real key with a real bill, and the tool is one command away on every developer's "
                  + "machine. A switch an operator holds is what makes a run a decision rather than an accident."),
+
+        new("settings." + Ai.EvalSettings.BaseUrlKey,
+            "Where your own model server answers, when the eval provider is a server of your own. Blank is this machine.",
+            "The address the eval tool sends its calls to when the eval provider is your own server, ending in /v1 "
+            + "for Ollama: http://localhost:11434/v1 on the machine the tool runs on (blank means that), or the https "
+            + "address of a gateway in front of a shared one, with the gateway's key as the eval key. For one run, "
+            + "--base-url on the command line wins, and WP_EVAL_BASE_URL fills in while this is blank.\n\n"
+            + "A run there costs nothing and proves the eval tool end to end. It does not prove the prompts for a "
+            + "hosted model: a small local model is weaker at drafting, so its scores say how that model does, not "
+            + "how the portal's provider would. Give the calls a long timeout and run one feature at a time.",
+            Why: "Without an address the tool would call a server that is not there. With a key, the address must be "
+                 + "https or this machine — a key is never sent as plain text across a network.",
+            Example: "http://localhost:11434/v1"),
 
         new("settings." + Ai.EvalSettings.ProviderKey,
             "Which provider the eval tool scores the prompts against. Blank means WP_EVAL_PROVIDER, else Google Gemini.",
@@ -1338,18 +1376,52 @@ public static class HelpRegistry
                  + "details become visible to you once you hire them."),
 
         new("opportunity.milestonePayments",
-            "Each milestone handed in waits on you: approve it or ask for changes, then mark it paid once you have paid.",
+            "Each milestone handed in waits on you on the board: approve it or ask for changes, then mark it paid once paid.",
             "Handed in: the freelancer claimed the milestone — a tag, a pull request or a file tagged with it — "
-            + "and you are emailed. Read the work, then Approve, or Ask for changes with a sentence they can act "
-            + "on; they hand it in again when it is done. Once approved, pay its amount directly (the portal holds "
-            + "no money) and choose Mark paid: that opens the next milestone for them. Mark paid on a milestone "
-            + "you have not approved approves it too.\n\n"
+            + "and you are emailed. Read the work, then on the Progress board choose Approve, or Ask for changes "
+            + "with a sentence they can act on; they hand it in again when it is done. Once approved, pay its "
+            + "amount directly (the portal holds no money) and choose Mark paid: that opens the next milestone for "
+            + "them. Mark paid on a milestone you have not approved approves it too.\n\n"
             + "The last payment completes the award: the repository transfers to your connected GitHub account "
             + "and both of you can rate the other. You may cancel the job while no milestone is waiting on you; "
             + "what was paid stays paid.",
             Why: "The freelancer is never more than one milestone ahead of their pay, and you never pay for a "
                  + "milestone you have not seen. How quickly you pay an approved milestone shows on your public "
                  + "payment record."),
+
+        new("opportunity.milestoneReview",
+            "Approve or ask for changes, with remarks and advice for the milestones ahead. Every review stays on the board.",
+            "A milestone handed in is reviewed on the Progress board. Approve accepts the work: its payment is due, "
+            + "and your remarks — what was good, what to keep doing — are optional. Ask for changes sends it back: "
+            + "say what should change, in a sentence the freelancer can act on, and they hand it in again when it is "
+            + "done. Either way you can add advice for the milestones ahead, which is direction rather than a verdict "
+            + "on this one. The freelancer is emailed your words, and every review stays on the milestone for both of "
+            + "you to read — a milestone sent back twice shows both rounds.\n\n"
+            + "An administrator can review on your behalf when you ask them to; the board says so, and you are told. "
+            + "Marking a milestone paid is yours alone.",
+            Why: "A freelancer who only learns “approved” or “changes” works blind on the next milestone. Remarks and "
+                 + "advice carry what you learned reviewing this one into the next, so there is less to send back "
+                 + "later — and a written record of each round is what both of you point to if the work or the "
+                 + "pay is ever disputed."),
+
+        new("opportunity.claimReview",
+            "Approve a claimed milestone or ask for changes, with advice. Only that entrant reads it; it picks no winner.",
+            "On a competitive opportunity each milestone an entrant claims can be reviewed from its cell on the "
+            + "Progress board. Select the claim: the dialog shows the files tagged with that milestone (they open to "
+            + "you as it is claimed; a repository's code opens at the deadline), the reviews so far, and the form. "
+            + "Approve says the milestone meets the brief so far; your remarks are optional. Ask for changes says "
+            + "what should change, in a sentence the entrant can act on — while entries run they can update the "
+            + "work, and the cell reads Updated once they have. Either way you can add advice for the milestones "
+            + "ahead.\n\n"
+            + "The entrant is emailed your words and reads every review on their own row of the board; the other "
+            + "entrants never see it. A review pays nothing and decides nothing on its own: you still pick the "
+            + "winner after the deadline, from the work as a whole. Reviews stay open while you read the entries, "
+            + "and close when the winner is announced. An administrator can review on your behalf when you ask; "
+            + "the board says so, and you are told.",
+            Why: "Entrants who hear nothing until the winner is announced find out too late that they misread the "
+                 + "brief. A word on each claim keeps every entrant on track, and the record of what you said to "
+                 + "each one shows you treated them alike. Saying it privately keeps one entrant's direction from "
+                 + "becoming everyone's."),
 
         new("opportunity.awardAmount",
             "The fixed amount the winner is paid. Entrants commit real days against this number.",
@@ -1920,28 +1992,36 @@ public static class HelpRegistry
                  + "once announced, the winner is the winner."),
 
         new("entry.upload",
-            "Hand your work in as files. They freeze at the deadline; the client sees them from then on.",
+            "Hand your work in as files. A claimed milestone's open to the client to review; the rest at the deadline.",
             "Upload what the brief asks for — up to 20 files, each under the portal's size limit. Tag a file "
             + "to a milestone to claim it: the board records the claim within seconds, first file wins, and "
             + "like a pushed tag it is never undone, so tag the version you stand by. Each file previews here "
             + "as the client will see it: pictures, PDFs, players and text in place.\n\n"
-            + "Until the deadline you can add files and delete the ones that claimed nothing. At the deadline "
+            + "Claiming a milestone hands it in: from then on the client can open the files tagged with it and "
+            + "review it — approve it, or ask for changes with advice — and you read their words on the board. "
+            + "A later file tagged with a milestone you already claimed is an update to it: the claim stays with "
+            + "the first file, the client sees the new one beside it, and the board marks the milestone Updated. "
+            + "Files tagged with nothing, or with a milestone you have not claimed, stay yours alone until the "
+            + "deadline; only how many you have uploaded shows on the board. Other entrants never see your "
+            + "files at all.\n\n"
+            + "Until the deadline you can add files and delete the ones tagged with no milestone. At the deadline "
             + "everything freezes: what is here then is what is judged, and a file that lands afterwards is "
-            + "not kept. The client cannot open your files before the deadline — only how many you have "
-            + "uploaded shows on the board — and other entrants never see them at all.",
-            Why: "A first draft uploaded early is not held against you: nobody but you opens it until everyone "
-                 + "has handed in. But a milestone claim is a public statement that the work is done, and it "
-                 + "cannot be taken back."),
+            + "not kept.",
+            Why: "A first draft uploaded without a milestone is not held against you: nobody but you opens it "
+                 + "until everyone has handed in. A claim is different — it says the milestone is done, it cannot "
+                 + "be taken back, and it is what the client reviews, so you hear early whether you are on track."),
 
         new("entry.files",
-            "The files this entrant handed in, as they stood at the deadline. Yours to download and keep.",
+            "The files this entrant handed in: a claimed milestone's from the claim, all of them from the deadline.",
             "Every file is shown as a brief's attachments are: pictures, PDFs, video, audio and text (notes, "
             + "CSV, JSON, Markdown up to 1 MB) preview in place, and anything else is a download. A file marked "
             + "with a milestone number is the one that claimed it on the board. Click an image to see it larger, "
             + "and download the real file before you judge it: a logo that reads at thumbnail size can fall apart "
             + "at 24px, and the brief's constraints are only checkable on the file itself.\n\n"
-            + "Nothing here transfers on payment the way a repository does — the files are already yours to "
-            + "download, from the moment the deadline passed.",
+            + "While entries run you see only the files tagged with a milestone the entrant has claimed — select "
+            + "the claim on the Progress board to read and review it. Everything else opens when the deadline "
+            + "passes. Nothing here transfers on payment the way a repository does — the files are yours to "
+            + "download from then on.",
             Why: "This is the whole of what an upload opportunity delivers. If a constraint in the brief cannot be "
                  + "checked from these files, the winner you announce is a guess."),
 
@@ -2647,6 +2727,44 @@ public static class HelpRegistry
                  + "policy must say the portal keeps them. Taking a verdict back is reversible only in the sense "
                  + "that the person can verify again; there is deliberately no button to put it back by hand."),
 
+        new("admin.categories",
+            "The kinds of work opportunities are filed under and members say they do: names, order, subcategories and skills.",
+            "The list is what the opportunity form, the profile, the Opportunities filter, the boards and the AI "
+            + "suggestions all read. Edit it here, then Save changes: every page picks it up within five minutes, "
+            + "and this one at once.\n\n"
+            + "Rename by changing the name — the key stays. Retire a kind by hiding it. Remove only what nothing "
+            + "uses yet; the save refuses anything still in use and says what uses it. Something else always stays, "
+            + "last.",
+            Why: "Opportunities and profiles store the key, not the name, with nothing tying it back to this list, so a "
+                 + "key that changed or vanished would strand them. The AI readings of briefs and profiles carry the "
+                 + "list too: a change to names, order, hidden kinds or the list itself means each freelancer's "
+                 + "Recommended reading is asked again on their next visit — one call each, inside the usual caps. "
+                 + "Skill lists cost nothing."),
+
+        new("admin.categories.key",
+            "What opportunities and profiles store. Lower-case letters, digits and hyphens; fixed once saved.",
+            "Suggested from the name when you add a category or subcategory, and yours to change until you save. "
+            + "After that only the name changes. A subcategory's key needs to be unique only under its category.",
+            Why: "Every opportunity and profile that chose this kind holds the key, and published opportunities "
+                 + "cannot be edited, so a renamed key would leave them under a kind that no longer exists."),
+
+        new("admin.categories.hidden",
+            "Retires a kind: nothing new can choose it, and everything that already did keeps it.",
+            "A hidden category or subcategory leaves the pickers on the opportunity form, the profile and the "
+            + "Opportunities filter, and the AI stops suggesting it. Opportunities and profiles that already have it "
+            + "keep its name, its board and its fit; a draft under it can be saved but not published until it is "
+            + "moved. Hiding a category hides its subcategories with it. Unhide it to offer it again.",
+            Why: "Removing a kind that is in use would strand what uses it. Hiding stops new uses and keeps "
+                 + "the old ones whole."),
+
+        new("admin.categories.skills",
+            "Skill names offered as chips to a member who picks this kind. They suggest; they decide nothing.",
+            "Members see these under the skills field once they say they work in this kind, and clients see a "
+            + "subcategory's list first on the opportunity form. One spelling each, so the portal spells a skill one "
+            + "way. A repeat is dropped when you save.",
+            Why: "A shared spelling is what lets an opportunity's required skills match what members list. "
+                 + "Editing these lists costs no AI calls."),
+
         new("admin.lockUser",
             "Keeps the person out from their next request — every session ends at once — and touches nothing they own.",
             "A lock is reversible and leaves no mark: opportunities stay open, entries stay in, repositories stay "
@@ -2973,6 +3091,8 @@ public static class HelpRegistry
         "opportunity.milestoneAmounts",
         "opportunity.hire",
         "opportunity.milestonePayments",
+        "opportunity.milestoneReview",
+        "opportunity.claimReview",
         "opportunity.requirements",
         "opportunity.rubric",
         "opportunity.standing",
@@ -3090,6 +3210,10 @@ public static class HelpRegistry
         "database.connection.encrypt",
         "database.connection.trustServerCertificate",
         "admin.deleteUser",
+        "admin.categories",
+        "admin.categories.key",
+        "admin.categories.hidden",
+        "admin.categories.skills",
         "admin.activity",
         "admin.conversations",
         "admin.slowQueries",

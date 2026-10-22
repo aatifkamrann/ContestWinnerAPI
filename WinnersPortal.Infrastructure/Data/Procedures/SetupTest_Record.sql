@@ -4,7 +4,7 @@ CREATE OR ALTER PROCEDURE [dbo].[SetupTest_Record]
     @kind nvarchar(16),
     @setupId nvarchar(16),
     @ok bit,
-    @detail nvarchar(240),
+    @detail nvarchar(1000),
     @fingerprint nvarchar(512),
     @testedAt datetimeoffset,
     @testedBy nvarchar(320) = NULL

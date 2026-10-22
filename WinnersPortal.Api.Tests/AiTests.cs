@@ -753,6 +753,7 @@ public class AiTests
     [InlineData("gemini", "gemini-3.6-flash")]
     [InlineData("anthropic", "claude-sonnet-5-5")]
     [InlineData("openai", "gpt-5.5")]
+    [InlineData("ollama", "llama3.1:8b")]
     public void A_blank_model_falls_back_to_the_provider_default(string provider, string expected)
     {
         Assert.Equal(expected, AiProviderRequests.DefaultModel(provider));
@@ -767,7 +768,7 @@ public class AiTests
             Assert.Equal(AiProviders.Find(key)!.DefaultModel, AiProviderRequests.DefaultModel(key));
             Assert.NotNull(AiProviderRequests.Build(key, "m", "k", "s", "u", AiOutputs.PingSchema).Url);
         }
-        Assert.Equal(3, AiProviders.Choices.Count);
+        Assert.Equal(4, AiProviders.Choices.Count);
     }
 
     [Fact]

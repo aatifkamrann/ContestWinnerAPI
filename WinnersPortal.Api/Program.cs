@@ -150,6 +150,9 @@ builder.Services.AddSingleton<SettingsService>();
 // The public lists, held for a few seconds so a crowd shares one read;
 // a clear crosses to the other API processes over Redis where there is one.
 builder.Services.AddSingleton<WinnersPortal.Services.Common.PublicReads>();
+// The kinds of work, held whole and swapped when an administrator saves
+// them; a save crosses to the other API processes over Redis.
+builder.Services.AddSingleton<WinnersPortal.Services.Opportunities.CategoryCatalog>();
 // The database move: a process-wide pause the workers and the gate honour,
 // the one move's state, and the mover that runs it in the background.
 builder.Services.AddSingleton<AppPause>();
@@ -264,6 +267,7 @@ builder.Services.AddScoped<ActivityService>();
 builder.Services.AddScoped<AdminService>();
 builder.Services.AddScoped<DatabaseAdminService>();
 builder.Services.AddScoped<UserAdminService>();
+builder.Services.AddScoped<CategoryAdminService>();
 builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<WinnersPortal.Services.Identity.IdentityService>();
@@ -271,6 +275,7 @@ builder.Services.AddScoped<WinnersPortal.Services.Identity.IdentityProofService>
 builder.Services.AddScoped<ApplicationService>();
 builder.Services.AddScoped<AwardService>();
 builder.Services.AddScoped<MilestonePaymentService>();
+builder.Services.AddScoped<ClaimReviewService>();
 builder.Services.AddScoped<CancelService>();
 builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<EntryService>();
@@ -418,6 +423,11 @@ using (var scope = app.Services.CreateScope())
     }
     await db.Database.MigrateAsync();
     await StoredProcedures.ApplyAsync(db, CancellationToken.None);
+    // The categories before anything reads them: the workers and the
+    // first-run demo start with app.Run, below.
+    var categories = app.Services.GetRequiredService<WinnersPortal.Services.Opportunities.CategoryCatalog>();
+    await categories.EnsureSeededAsync(db, CancellationToken.None);
+    await categories.LoadAsync(CancellationToken.None);
 }
 if (redis.Active is not null)
     app.Logger.LogInformation("Redis: on, at {Endpoints}; chosen by {Source}.", redis.Endpoints, redis.Source);

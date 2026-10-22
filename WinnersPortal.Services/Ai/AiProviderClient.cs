@@ -42,7 +42,11 @@ public static class AiProviderRequests
     /// prompt still names the shape in words — the schema holds the keys and
     /// types, the prompt says what goes in them.
     /// </param>
-    public static AiRequest Build(string provider, string model, string apiKey, string system, string user, object schema)
+    /// <param name="baseUrl">
+    /// A local server's address (<see cref="AiProviders.BaseUrl"/>); a
+    /// hosted provider's is fixed here and this is ignored.
+    /// </param>
+    public static AiRequest Build(string provider, string model, string apiKey, string system, string user, object schema, string? baseUrl = null)
     {
         return provider switch
         {
@@ -106,9 +110,52 @@ public static class AiProviderRequests
                     },
                     max_completion_tokens = AnswerTokens,
                 })),
+            // OpenAI's request at the operator's own address. Ollama holds
+            // the answer to the schema and ignores strict; a small model is
+            // still wrong inside the shape, which is the gate's to catch.
+            // The older max_tokens field, which every such server reads.
+            "ollama" => Local(baseUrl, "chat/completions", apiKey, JsonSerializer.Serialize(new
+            {
+                model,
+                messages = new[]
+                {
+                    new { role = "system", content = system },
+                    new { role = "user", content = user },
+                },
+                response_format = new
+                {
+                    type = "json_schema",
+                    json_schema = new { name = "answer", strict = true, schema },
+                },
+                max_tokens = AnswerTokens,
+                stream = false,
+            })),
             _ => throw Unknown(provider),
         };
     }
+
+    /// <summary>
+    /// A request to a local server: its address and the path, and the key
+    /// as a bearer token only where one is set and may travel there
+    /// (<see cref="AiProviders.KeyMayGoTo"/>) — a gateway in front asks for
+    /// one, the server itself inside the network does not.
+    /// </summary>
+    internal static AiRequest Local(string? baseUrl, string path, string apiKey, string body)
+    {
+        var url = $"{AiProviders.BaseUrl(AiProviders.Ollama, baseUrl)}/{path}";
+        var headers = new Dictionary<string, string>();
+        if (!string.IsNullOrWhiteSpace(apiKey) && AiProviders.KeyMayGoTo(url)) headers["Authorization"] = $"Bearer {apiKey}";
+        return new AiRequest(url, headers, body);
+    }
+
+    /// <summary>
+    /// Set on a request to a server with one queue shared by every app that
+    /// calls it: an attempt that timed out there may still be running, and a
+    /// retry would join the back of the same queue, so the pipeline does not
+    /// retry a timeout to it (<see cref="AiResilience"/>). The standby, if one
+    /// is marked, is asked instead.
+    /// </summary>
+    public static readonly HttpRequestOptionsKey<bool> OneQueue = new("ai.oneQueue");
 
     /// <summary>
     /// The model's text out of each provider's envelope — after reading why
@@ -128,7 +175,7 @@ public static class AiProviderRequests
         {
             "gemini" => Gemini(root),
             "anthropic" => Anthropic(root),
-            "openai" => OpenAi(root),
+            "openai" or "ollama" => OpenAi(root),
             _ => throw Unknown(provider),
         };
         return text.Length > 0 ? text : throw new AiProviderException(0,
@@ -230,7 +277,7 @@ public static class AiProviderRequests
                 "anthropic" when Obj(root, "usage") is { } u =>
                     new AiTokens(Num(u, "input_tokens") + Num(u, "cache_creation_input_tokens") + Num(u, "cache_read_input_tokens"),
                         Num(u, "output_tokens")),
-                "openai" when Obj(root, "usage") is { } u =>
+                "openai" or "ollama" when Obj(root, "usage") is { } u =>
                     new AiTokens(Num(u, "prompt_tokens"), Num(u, "completion_tokens")),
                 _ => null,
             };
@@ -248,16 +295,25 @@ public static class AiProviderRequests
             ? v.GetString()
             : null;
 
-    /// <summary>All three providers wrap errors as {"error":{"message":…}}; dig it out for a readable note.</summary>
+    /// <summary>
+    /// The hosted providers wrap errors as {"error":{"message":…}}; Ollama
+    /// as {"error":"…"} ("model 'x' not found", "loading model"). Dug out
+    /// for a readable note either way.
+    /// </summary>
     public static string ErrorDetail(int statusCode, string body)
     {
         try
         {
             using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("error", out var err)
-                && err.TryGetProperty("message", out var msg)
-                && msg.ValueKind == JsonValueKind.String)
-                return $"The provider answered {statusCode}: {AiRules.Clip(msg.GetString(), 300)}";
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("error", out var err))
+            {
+                var words = err.ValueKind == JsonValueKind.String ? err.GetString()
+                    : err.ValueKind == JsonValueKind.Object && err.TryGetProperty("message", out var msg) && msg.ValueKind == JsonValueKind.String
+                        ? msg.GetString()
+                        : null;
+                if (!string.IsNullOrWhiteSpace(words))
+                    return $"The provider answered {statusCode}: {AiRules.Clip(words, 300)}";
+            }
         }
         catch (JsonException)
         {
@@ -336,13 +392,14 @@ public sealed class AiProviderClient(IHttpClientFactory httpFactory)
     /// own words. Null leaves the row with the provider and model alone.
     /// </param>
     /// <returns>The model's text and what the call cost in tokens, where the provider said.</returns>
+    /// <param name="baseUrl">A local server's address, from its setup; ignored for a hosted provider.</param>
     public async Task<AiCompletion> CompleteAsync(
         string provider, string model, string apiKey, string system, string user, object schema, CancellationToken ct,
-        string? detail = null)
+        string? detail = null, string? baseUrl = null)
     {
         var body = await SendAsync(
-            AiProviderRequests.Build(provider, model, apiKey, system, user, schema),
-            apiKey, AiProviders.CallName(provider, model), detail, ct);
+            AiProviderRequests.Build(provider, model, apiKey, system, user, schema, baseUrl),
+            apiKey, AiProviders.CallName(provider, model), detail, OneQueue(provider), ct);
         // A 200 that carries no answer still carries its bill — an answer
         // cut off at the token budget is the dearest kind — so the count
         // travels with the failure for the caller to spend.
@@ -365,10 +422,12 @@ public sealed class AiProviderClient(IHttpClientFactory httpFactory)
     /// asks for one yet; the eval tool's matching run measures them first.
     /// </summary>
     public async Task<AiEmbedding> EmbedAsync(
-        string provider, string model, string apiKey, IReadOnlyList<string> texts, CancellationToken ct, string? detail = null)
+        string provider, string model, string apiKey, IReadOnlyList<string> texts, CancellationToken ct, string? detail = null,
+        string? baseUrl = null)
     {
         var body = await SendAsync(
-            AiEmbeddings.Build(provider, model, apiKey, texts), apiKey, AiProviders.CallName(provider, model), detail, ct);
+            AiEmbeddings.Build(provider, model, apiKey, texts, baseUrl), apiKey, AiProviders.CallName(provider, model), detail,
+            OneQueue(provider), ct);
         return new AiEmbedding(AiEmbeddings.ReadVectors(provider, body, texts.Count), AiProviderRequests.ReadTokens(provider, body));
     }
 
@@ -378,7 +437,7 @@ public sealed class AiProviderClient(IHttpClientFactory httpFactory)
     /// failures, and an error status thrown with the provider's words.
     /// </summary>
     private async Task<string> SendAsync(
-        AiProviderRequests.AiRequest request, string apiKey, string subject, string? detail, CancellationToken ct)
+        AiProviderRequests.AiRequest request, string apiKey, string subject, string? detail, bool oneQueue, CancellationToken ct)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, request.Url)
         {
@@ -387,6 +446,7 @@ public sealed class AiProviderClient(IHttpClientFactory httpFactory)
         foreach (var (name, value) in request.Headers)
             message.Headers.TryAddWithoutValidation(name, value);
         message.WithSecrets(apiKey);
+        if (oneQueue) message.Options.Set(AiProviderRequests.OneQueue, true);
         // Members see the portal's own name; the activity row says which vendor and model it was.
         message.WithSubject(subject);
         if (detail is not null) message.WithDetail(detail);
@@ -414,6 +474,9 @@ public sealed class AiProviderClient(IHttpClientFactory httpFactory)
                 AiProviderRequests.ErrorDetail((int)response.StatusCode, body));
         return body;
     }
+
+    /// <summary>A local server is one queue for every caller (<see cref="AiProviderRequests.OneQueue"/>).</summary>
+    private static bool OneQueue(string provider) => AiProviders.Find(provider) is { Local: true };
 }
 
 /// <summary>A provider's answer: the model's text, and the tokens it counted — null when it counted none.</summary>

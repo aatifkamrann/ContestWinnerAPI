@@ -304,6 +304,29 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         // is ordered by and the reading beside the remove button. One
         // batched read; the arithmetic is Standing's, line by line.
         var standings = await StandingReader.ForOpportunitiesAsync(db, [c.Id], now, buildsOn, ct);
+
+        // Competitive, every review of every claim the viewer may read: the
+        // client and administrators every row's, an entrant their own, nobody
+        // else any — an entrant never learns what was said to a rival. Paid by
+        // milestone, the reviews ride the payments below instead.
+        var competitive = !MilestonePay.ByMilestone(c.Kind);
+        var readsEveryReview = competitive && canModerate;
+        var reviewedClaims = competitive
+            ? entrantRows
+                .Where(e => readsEveryReview || e.FreelancerId == viewerId)
+                .SelectMany(e => e.Claimed.Select(cp => cp.Id))
+                .ToList()
+            : [];
+        var claimReviewRows = reviewedClaims.Count > 0
+            ? await db.MilestoneReviews.AsNoTracking()
+                .Where(r => reviewedClaims.Contains(r.CheckpointId))
+                .OrderBy(r => r.AtUtc)
+                .Select(r => new { r.CheckpointId, r.Decision, r.Note, r.Advice, r.OnBehalf, r.AtUtc })
+                .ToListAsync(ct)
+            : [];
+        var claimReviews = claimReviewRows.ToLookup(r => r.CheckpointId);
+        var repoWork = Delivery.UsesRepository(c.Delivery);
+
         var entrants = entrantRows
             .Select(e =>
             {
@@ -385,7 +408,15 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                         ? e.Files.Select(f => SubmissionService.Summary(
                             f.Id, f.FileName, f.ContentType, f.SizeBytes, f.UploadedAtUtc, f.MilestoneOrder + 1))
                             .ToList()
-                        : null,
+                        // …and before the deadline, the client's: the files of
+                        // the milestones this entrant has claimed, to review.
+                        : Delivery.CanSeeClaimedFiles(isOwner, c.Status)
+                            ? e.Files
+                                .Where(f => f.MilestoneOrder is { } order && e.Claimed.Any(cp => cp.Order == order))
+                                .Select(f => SubmissionService.Summary(
+                                    f.Id, f.FileName, f.ContentType, f.SizeBytes, f.UploadedAtUtc, f.MilestoneOrder + 1))
+                                .ToList()
+                            : null,
                     // review controls — the owner announces from these
                     // rows, and an administrator moderates from them
                     EntryId = canModerate ? e.Id : (Guid?)null,
@@ -404,6 +435,32 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                         : null,
                     // The final version's preview, for those who may run it.
                     FinalPreview = canModerate || own ? FinalOf(e.Id, e.FrozenAtUtc) : null,
+                    // Competitive, each claim's reviews, one per column: on
+                    // every row for the client and administrators, on their
+                    // own for an entrant. "Updated" once work for a milestone
+                    // landed after a request for changes — a file tagged with
+                    // it, or a push.
+                    Reviews = showBoard && (readsEveryReview || (competitive && own))
+                        ? ordered.Select(m =>
+                        {
+                            var cp = e.Claimed.FirstOrDefault(x => x.Order == m.Order);
+                            var rounds = cp is null ? [] : claimReviews[cp.Id].ToList();
+                            var latest = rounds.LastOrDefault();
+                            var fileAt = e.Files.Where(f => f.MilestoneOrder == m.Order).Max(f => f.UploadedAtUtc);
+                            var workAt = new[] { fileAt, repoWork ? e.LastPushAtUtc : null }.Max();
+                            return new ClaimReviewCell(
+                                cp?.Id,
+                                ClaimReview.StateName(cp is not null, latest?.Decision, latest?.AtUtc, workAt),
+                                rounds.Select(r => new MilestoneReviewView
+                                {
+                                    Decision = MilestonePay.DecisionName(r.Decision),
+                                    Note = r.Note,
+                                    Advice = r.Advice,
+                                    OnBehalf = r.OnBehalf,
+                                    AtUtc = r.AtUtc,
+                                }).ToList());
+                        }).ToList()
+                        : null,
                 };
             })
             .ToList();
@@ -453,6 +510,16 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             .ToList());
         var payMoney = MilestonePay.Money(payStates, ordered.Select(m => m.Amount).ToList());
         var seesPayment = isOwner || isAdmin || viewerIsWinner;
+        // Every decision on every claim, oldest first — the record the two
+        // parties (and an administrator) read on the board; nobody else.
+        var claimIds = payRows.Select(p => p.Id).ToList();
+        var reviewRows = seesPayment && claimIds.Count > 0
+            ? await db.MilestoneReviews.AsNoTracking()
+                .Where(r => claimIds.Contains(r.CheckpointId))
+                .OrderBy(r => r.AtUtc)
+                .Select(r => new { r.CheckpointId, r.Decision, r.Note, r.Advice, r.OnBehalf, r.AtUtc })
+                .ToListAsync(ct)
+            : [];
 
         // The client's public payment record — the counterweight to "no
         // deposit, open entry". Entrants stake real work on this client's
@@ -773,6 +840,17 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                     Ref = seesPayment ? paySteps[i]?.Ref : null,
                     ChangesNote = seesPayment ? paySteps[i]?.ChangesNote : null,
                     ChangesRequestedAtUtc = seesPayment ? paySteps[i]?.ChangesRequestedAtUtc : null,
+                    Reviews = !seesPayment ? null : reviewRows
+                        .Where(r => paySteps[i] is { } step && r.CheckpointId == step.Id)
+                        .Select(r => new MilestoneReviewView
+                        {
+                            Decision = MilestonePay.DecisionName(r.Decision),
+                            Note = r.Note,
+                            Advice = r.Advice,
+                            OnBehalf = r.OnBehalf,
+                            AtUtc = r.AtUtc,
+                        })
+                        .ToList(),
                 }).ToList(),
                 AmountPaid = byMilestone ? payMoney.Paid : null,
                 AmountOwed = byMilestone ? payMoney.Owed : null,
@@ -813,7 +891,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         if (opportunity.Status != OpportunityStatus.Draft)
             return Outcome.Conflict("Only drafts can be edited. A published brief is what entrants committed their time to.");
 
-        var error = Validate(request) ?? await ComposeProblemAsync(request, ct);
+        var error = Validate(request, opportunity) ?? await ComposeProblemAsync(request, ct);
         if (error is not null) return Outcome.Invalid(error);
         db.OpportunitySkills.RemoveRange(opportunity.Skills);
         opportunity.Skills.Clear();
@@ -868,7 +946,7 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
             return Outcome.Invalid("Write the brief before publishing — it is what entrants build against.");
         if (opportunity.Milestones.Count == 0)
             return Outcome.Invalid("Add at least one milestone; the checklist becomes every entrant's board.");
-        if (OpportunityCategories.PublishProblem(opportunity.Category) is { } uncategorised)
+        if (OpportunityCategories.PublishProblem(opportunity.Category, opportunity.Subcategory) is { } uncategorised)
             return Outcome.Invalid(uncategorised);
         // The form drops the requirement while builds are off; a draft saved
         // before the host went quiet is caught here rather than published
@@ -930,7 +1008,8 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
         });
     }
 
-    private static string? Validate(OpportunityUpsertRequest r)
+    /// <param name="saved">The draft as stored, on an update: a category retired since may stay, but not be newly chosen.</param>
+    private static string? Validate(OpportunityUpsertRequest r, Opportunity? saved = null)
     {
         var title = r.Title?.Trim() ?? "";
         if (title.Length is < 4 or > 140) return "Title must be 4–140 characters.";
@@ -947,7 +1026,8 @@ public sealed class OpportunityService(AppDbContext db, AiOptions ai, AiWorkSign
                 return amount;
         if (r.MetaTitle?.Trim().Length > 80) return "The search title must stay under 80 characters.";
         if (r.MetaDescription?.Trim().Length > 200) return "The search description must stay under 200 characters.";
-        if (OpportunityCategories.Problem(r.Category, r.Subcategory) is { } category) return category;
+        if (OpportunityCategories.Problem(r.Category, r.Subcategory, saved?.Category, saved?.Subcategory) is { } category)
+            return category;
         if (OpportunityFit.MeritProblem(r.MinMeritScore) is { } merit) return merit;
         if (OpportunityFit.CleanSkills(r.Skills, out var skills) is null) return skills;
         if (Rubric.CleanRequirements(r.Requirements, out var requirements) is null) return requirements;

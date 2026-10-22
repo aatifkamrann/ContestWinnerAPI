@@ -28,8 +28,9 @@ public sealed class OpportunityController(OpportunityService opportunities) : Co
     // a word list on this server, and the skills each kind carries are
     // not that word list coming back: they decide nothing, and are the
     // names offered to a member who has already said which kind of work
-    // is theirs. Nobody’s data, so anonymous, and cacheable for as long
-    // as the build.
+    // is theirs. Nobody’s data, so anonymous. The list is what an
+    // administrator keeps under Admin → Categories, hidden kinds included
+    // and marked: a picker leaves them out, a label still needs them.
     [HttpGet("api/opportunities/categories")]
     public IResult GetCategories() =>
         Results.Ok(new OpportunityCategoriesResponse
@@ -38,8 +39,9 @@ public sealed class OpportunityController(OpportunityService opportunities) : Co
         {
             Key = c.Key,
             Label = c.Label,
-            Subcategories = c.Subcategories.Select(s => new SubcategoryOption(s.Key, s.Label, s.Skills)),
+            Subcategories = c.Subcategories.Select(s => new SubcategoryOption(s.Key, s.Label, s.Skills, s.Hidden)),
             Skills = c.Skills,
+            Hidden = c.Hidden,
         }),
         MaxSkills = OpportunityFit.MaxSkills,
         MaxSkillName = OpportunityFit.MaxSkillName,
@@ -101,7 +103,10 @@ public sealed record CategoryOption
     public required string Label { get; init; }
     public required IEnumerable<SubcategoryOption> Subcategories { get; init; }
     public required IReadOnlyList<string> Skills { get; init; }
+
+    /// <summary>Retired: still a label for what chose it, offered to nothing new.</summary>
+    public bool Hidden { get; init; }
 }
 
 /// <summary>A narrower kind of work inside a category, and the skills the opportunity form offers with it.</summary>
-public sealed record SubcategoryOption(string Key, string Label, IReadOnlyList<string> Skills);
+public sealed record SubcategoryOption(string Key, string Label, IReadOnlyList<string> Skills, bool Hidden);

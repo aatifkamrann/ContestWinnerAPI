@@ -25,12 +25,16 @@ public static class AiEmbeddings
     {
         AiProviders.Gemini => "gemini-embedding-2",
         AiProviders.OpenAi => "text-embedding-3-small",
+        // An embedding model has to be pulled on the server; a chat model
+        // asked for embeddings answers 501.
+        AiProviders.Ollama => "nomic-embed-text",
         AiProviders.Anthropic => throw new AiProviderException(0,
             "Anthropic offers no embedding model — embeddings run on Gemini or OpenAI."),
         _ => throw new AiProviderException(0, $"Unknown AI provider '{provider}' — the portal supports {AiProviders.Named}."),
     };
 
-    public static AiProviderRequests.AiRequest Build(string provider, string model, string apiKey, IReadOnlyList<string> texts)
+    /// <param name="baseUrl">A local server's address, from its setup; ignored for a hosted provider.</param>
+    public static AiProviderRequests.AiRequest Build(string provider, string model, string apiKey, IReadOnlyList<string> texts, string? baseUrl = null)
     {
         if (texts.Count is 0 or > MaxTexts)
             throw new ArgumentOutOfRangeException(nameof(texts), texts.Count, $"An embedding request carries 1 to {MaxTexts} texts.");
@@ -52,6 +56,7 @@ public static class AiEmbeddings
                 "https://api.openai.com/v1/embeddings",
                 new Dictionary<string, string> { ["Authorization"] = $"Bearer {apiKey}" },
                 JsonSerializer.Serialize(new { model, input = texts })),
+            AiProviders.Ollama => AiProviderRequests.Local(baseUrl, "embeddings", apiKey, JsonSerializer.Serialize(new { model, input = texts })),
             AiProviders.Anthropic => throw new AiProviderException(0,
                 "Anthropic offers no embedding model — embeddings run on Gemini or OpenAI."),
             _ => throw new AiProviderException(0, $"Unknown AI provider '{provider}' — the portal supports {AiProviders.Named}."),
@@ -73,7 +78,7 @@ public static class AiEmbeddings
             AiProviders.Gemini => root.TryGetProperty("embeddings", out var list) && list.ValueKind == JsonValueKind.Array
                 ? list.EnumerateArray().Select(e => Vector(e, "values")).ToList()
                 : [],
-            AiProviders.OpenAi => root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
+            AiProviders.OpenAi or AiProviders.Ollama => root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
                 ? data.EnumerateArray()
                     .Select(e => (Index: e.TryGetProperty("index", out var i) && i.TryGetInt32(out var n) ? n : -1, Vector: Vector(e, "embedding")))
                     .OrderBy(x => x.Index)

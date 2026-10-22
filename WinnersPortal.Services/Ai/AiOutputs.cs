@@ -82,9 +82,16 @@ public static class AiOutputs
     /// validator still runs on every answer: a schema holds the shape, not
     /// the sense, and a provider's promise is not the portal's gate.
     /// </summary>
-    public static object Schema(AiFeature feature)
+    public static object Schema(AiFeature feature) => Schema(feature, Opportunities.OpportunityCategories.Current);
+
+    /// <summary>
+    /// The same, against a given list: the live one for a call, the shipped
+    /// one for the prompt pins, which must not change when an administrator
+    /// edits the categories (the list is data, and is in the cache hash).
+    /// </summary>
+    public static object Schema(AiFeature feature, Opportunities.Taxonomy taxonomy)
     {
-        var categoryKeys = Opportunities.OpportunityCategories.All.Select(c => c.Key).ToArray();
+        var categoryKeys = taxonomy.Offered.Select(c => c.Key).ToArray();
         return feature switch
         {
             AiFeature.MilestoneExtraction => AiSchema.Obj(
@@ -272,14 +279,17 @@ public static class AiOutputs
     {
         error = null;
         var key = Opportunities.OpportunityCategories.CleanKey(Str(root, "category"));
-        var category = Opportunities.OpportunityCategories.Find(key);
-        if (category is null)
+        var taxonomy = Opportunities.OpportunityCategories.Current;
+        var category = taxonomy.Find(key);
+        if (category is null || category.Hidden)
             return Fail("The model named a category this portal does not have.", out error);
 
         // A subcategory under the wrong parent is dropped rather than
         // refused: the category it chose is still worth offering.
-        var sub = Opportunities.OpportunityCategories.FindSub(
+        // So is one that is no longer offered.
+        var sub = Opportunities.Taxonomy.FindSub(
             category, Opportunities.OpportunityCategories.CleanKey(Str(root, "subcategory")));
+        if (sub?.Hidden == true) sub = null;
 
         return JsonSerializer.Serialize(new
         {
@@ -302,12 +312,14 @@ public static class AiOutputs
         if (!root.TryGetProperty("categories", out var arr) || arr.ValueKind != JsonValueKind.Array)
             return Fail("The reading came back without a list of categories.", out error);
 
+        var taxonomy = Opportunities.OpportunityCategories.Current;
+
         var keys = arr.EnumerateArray()
             .Where(v => v.ValueKind == JsonValueKind.String)
             .Select(v => Opportunities.OpportunityCategories.CleanKey(v.GetString()))
-            .Where(k => k is not null && Opportunities.OpportunityCategories.Keys.Contains(k))
+            .Where(k => k is not null && taxonomy.Keys.Contains(k))
             .Distinct(StringComparer.Ordinal)
-            .Take(Opportunities.OpportunityCategories.All.Count)
+            .Take(taxonomy.Keys.Count)
             .ToArray();
 
         return JsonSerializer.Serialize(new { categories = keys });

@@ -95,12 +95,29 @@ public static class Delivery
     /// The client from the deadline on — the same promise the repository
     /// path makes ("the client only sees your work at the deadline"), kept
     /// for a file, because an entrant who uploads a first draft early
-    /// should not be judged on it before the others have handed in.
+    /// should not be judged on it before the others have handed in — bar
+    /// the milestones they claim (<see cref="CanSeeClaimedFiles"/>).
     /// </summary>
     public static bool CanSeeFiles(bool isEntrant, bool isOwner, bool isAdmin, OpportunityStatus status) =>
         isEntrant
         || isAdmin
         || (isOwner && status is OpportunityStatus.Reviewing or OpportunityStatus.Awarded);
+
+    /// <summary>
+    /// The client's one early window, while entries run: a file tagged with a
+    /// milestone the entrant has claimed opens to them as the claim lands, so
+    /// the milestone can be reviewed — approved, or sent back with what to
+    /// change while there is time. The entrant chose to claim it, which is
+    /// handing it in. Untagged files, and files for milestones not yet
+    /// claimed, still wait for the deadline; so does a repository's code.
+    /// </summary>
+    public static bool CanSeeClaimedFiles(bool isOwner, OpportunityStatus status) =>
+        isOwner && status == OpportunityStatus.Open;
+
+    /// <summary>One file, by both rules: everything from the deadline, a claimed milestone's before it.</summary>
+    public static bool CanSeeFile(bool isEntrant, bool isOwner, bool isAdmin, OpportunityStatus status, bool ofClaimedMilestone) =>
+        CanSeeFiles(isEntrant, isOwner, isAdmin, status)
+        || (ofClaimedMilestone && CanSeeClaimedFiles(isOwner, status));
 
     /// <summary>
     /// Why a file may not be deleted, or null. A file that carried a

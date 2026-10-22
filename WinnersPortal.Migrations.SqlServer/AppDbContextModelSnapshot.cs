@@ -406,6 +406,39 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.ToTable("Awards");
                 });
 
+            modelBuilder.Entity("WinnersPortal.Domain.Category", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<bool>("Hidden")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Skills")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("Categories");
+                });
+
             modelBuilder.Entity("WinnersPortal.Domain.ChatMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -964,6 +997,42 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.HasIndex("OpportunityId", "Order");
 
                     b.ToTable("Milestones");
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.MilestoneReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Advice")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("AtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CheckpointId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Decision")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("OnBehalf")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckpointId", "AtUtc");
+
+                    b.ToTable("MilestoneReviews");
                 });
 
             modelBuilder.Entity("WinnersPortal.Domain.Notification", b =>
@@ -1816,6 +1885,36 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.ToTable("SetupTests");
                 });
 
+            modelBuilder.Entity("WinnersPortal.Domain.Subcategory", b =>
+                {
+                    b.Property<string>("CategoryKey")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<bool>("Hidden")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Skills")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("CategoryKey", "Key");
+
+                    b.ToTable("Subcategories");
+                });
+
             modelBuilder.Entity("WinnersPortal.Domain.Submission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2232,6 +2331,17 @@ namespace WinnersPortal.Migrations.SqlServer
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("WinnersPortal.Domain.MilestoneReview", b =>
+                {
+                    b.HasOne("WinnersPortal.Domain.Checkpoint", "Checkpoint")
+                        .WithMany()
+                        .HasForeignKey("CheckpointId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Checkpoint");
+                });
+
             modelBuilder.Entity("WinnersPortal.Domain.Notification", b =>
                 {
                     b.HasOne("WinnersPortal.Domain.User", "User")
@@ -2419,6 +2529,15 @@ namespace WinnersPortal.Migrations.SqlServer
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("WinnersPortal.Domain.Subcategory", b =>
+                {
+                    b.HasOne("WinnersPortal.Domain.Category", null)
+                        .WithMany("Subcategories")
+                        .HasForeignKey("CategoryKey")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("WinnersPortal.Domain.Submission", b =>
                 {
                     b.HasOne("WinnersPortal.Domain.Entry", "Entry")
@@ -2443,6 +2562,11 @@ namespace WinnersPortal.Migrations.SqlServer
                         .HasForeignKey("WinnersPortal.Domain.UserAvatar", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("WinnersPortal.Domain.Category", b =>
+                {
+                    b.Navigation("Subcategories");
                 });
 
             modelBuilder.Entity("WinnersPortal.Domain.Entry", b =>

@@ -241,8 +241,18 @@ public static partial class StandingReader
             .ToListAsync(ct);
         if (entries.Count == 0) return new Reads(opportunities, entries, new(), [], [], new());
 
-        var userIds = entries.Select(e => e.FreelancerId).Distinct().ToList();
+        var people = await PeopleLinqAsync(db, opportunityIds, entries.Select(e => e.FreelancerId).Distinct().ToList(), ct);
+        return new Reads(opportunities, entries, people.Profiles, people.GithubConnected, people.History, people.Ratings);
+    }
 
+    /// <summary>
+    /// The four reads about the people behind the entries, apart so the
+    /// test that every LINQ read translates reaches them: its database
+    /// holds no entries, and with none the read stops above.
+    /// </summary>
+    internal static async Task<(Dictionary<Guid, ProfileRow> Profiles, HashSet<Guid> GithubConnected, List<HistoryRow> History, Dictionary<Guid, RatingRow> Ratings)>
+        PeopleLinqAsync(AppDbContext db, IReadOnlyCollection<Guid> opportunityIds, List<Guid> userIds, CancellationToken ct)
+    {
         var profiles = await db.Profiles.AsNoTracking()
             .Where(p => userIds.Contains(p.UserId))
             .Select(p => new ProfileRow
@@ -279,6 +289,6 @@ public static partial class StandingReader
             .Select(g => new RatingRow(g.Key, g.Count(), g.Sum(r => r.Stars)))
             .ToDictionaryAsync(r => r.UserId, ct);
 
-        return new Reads(opportunities, entries, profiles, githubConnected, history, ratings);
+        return (profiles, githubConnected, history, ratings);
     }
 }
