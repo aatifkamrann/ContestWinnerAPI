@@ -48,6 +48,7 @@ public sealed class Expectation
     public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
     {
         "category", "subcategory", "confident", "categories", "notCategories", "minCount", "maxCount", "mentionsAny", "forbidWords", "forbidPattern", "judge",
+        "competitiveBetween",
     };
 
     /// <summary>The category key the answer must name (categorise).</summary>
@@ -79,6 +80,9 @@ public sealed class Expectation
 
     /// <summary>A regular expression no text in the answer may match (case-insensitive).</summary>
     public string? ForbidPattern { get; init; }
+
+    /// <summary>The range the competitive figure must land in, in whole dollars (award): a sense check on the scale, the judge reads the rest.</summary>
+    public (decimal Low, decimal High)? CompetitiveBetween { get; init; }
 
     /// <summary>A rubric for the judge model, for what no check can read — tone, faithfulness, whether prose says what the facts show.</summary>
     public string? Judge { get; init; }
@@ -126,6 +130,16 @@ public sealed class Expectation
             }
         }
 
+        (decimal, decimal)? between = null;
+        if (merged.TryGetValue("competitiveBetween", out var range))
+        {
+            var ends = range.ValueKind == JsonValueKind.Array
+                ? range.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.Number).Select(v => v.GetDecimal()).ToList()
+                : [];
+            if (ends.Count == 2 && ends[0] <= ends[1]) between = (ends[0], ends[1]);
+            else problems.Add("expect.competitiveBetween must be two amounts, the lower first.");
+        }
+
         var groups = new List<IReadOnlyList<string>>();
         if (merged.TryGetValue("mentionsAny", out var any))
         {
@@ -152,6 +166,7 @@ public sealed class Expectation
             ForbidWords = forbid.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             ForbidPattern = pattern,
             Judge = Str("judge"),
+            CompetitiveBetween = between,
         };
     }
 

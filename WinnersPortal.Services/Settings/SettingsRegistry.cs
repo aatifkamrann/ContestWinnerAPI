@@ -259,6 +259,7 @@ public static class SettingsRegistry
         new("ai.features.applicationEvaluation", "ai", "Evaluation notes on an opportunity application", Default: "true", HelpRequired: true, IsBoolean: true),
         new("ai.features.requirementsSuggestion", "ai", "Technical requirements drafted on the opportunity form", Default: "true", HelpRequired: true, IsBoolean: true),
         new("ai.features.criteriaSuggestion", "ai", "Scoring rubric drafted on the opportunity form", Default: "true", HelpRequired: true, IsBoolean: true),
+        new("ai.features.awardSuggestion", "ai", "Award suggestions on the opportunity form, checked again at publish", Default: "true", HelpRequired: true, IsBoolean: true),
 
         // ai evals — the golden-set eval tool's own provider and key
         // (tests/WinnersPortal.AiEvals), kept apart from the AI setup so a

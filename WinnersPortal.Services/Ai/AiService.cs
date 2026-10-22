@@ -17,7 +17,7 @@ namespace WinnersPortal.Services.Ai;
 /// because one was unavailable. Every draft is fetched back by the person
 /// who asked for it, read, and acted on by them: AI drafts, humans decide.
 /// </summary>
-public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache cache, AiCaller caller, ILogger<AiService.AiFormDraftLog> log, AppDbContext db, AiWorkSignal aiSignal, GitHubService github)
+public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache cache, AiCaller caller, ILogger<AiService.AiFormDraftLog> log, AppDbContext db, AiWorkSignal aiSignal, GitHubService github, SettingsService settings)
 {
     public async Task<Outcome<AiDraftResponse>> DraftBriefFieldAsync(string feature, OpportunityFormSnapshot request, ClaimsPrincipal principal, CancellationToken ct)
     {
@@ -34,8 +34,99 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache
             return Outcome.Invalid(
                 "Write the title and a few lines of the brief first — there is nothing to read yet.");
 
+        if (f == AiFeature.AwardSuggestion) return await DraftAwardAsync(request, principal, ct);
+
         return await DraftInlineAsync(
             f, AiPrompts.ForForm(f, request), principal, ai, quota, cache, caller, log, ct);
+    }
+
+    /// <summary>
+    /// The award suggestion: the form tools' one call, with the terms only
+    /// the server knows put in first — the portal's minimum award, and its
+    /// default duration where the deadline is blank — and the minimum held
+    /// to on the answer. A saved draft keeps its last answer, so the same
+    /// form reopened next week, and the check the publish dialog makes, read
+    /// the same three figures without paying for them again.
+    /// </summary>
+    private async Task<Outcome<AiDraftResponse>> DraftAwardAsync(
+        OpportunityFormSnapshot request, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        const AiFeature f = AiFeature.AwardSuggestion;
+        var floor = decimal.TryParse(await settings.GetAsync("opportunity.minAwardUsd", ct), out var m) && m > 0 ? m : 0;
+        var days = request.DurationDays is > 0
+            ? request.DurationDays
+            : int.TryParse(await settings.GetAsync("opportunity.defaultDurationDays", ct), out var d) ? d : 14;
+        var prompt = AiPrompts.ForForm(f, request with { DurationDays = days, MinimumAwardUsd = floor });
+        var hash = AiRules.InputHash(f, prompt.System + "\n" + prompt.User);
+
+        var draftId = request.DraftId is { } id && await OwnsOpportunityAsync(db, id, Principal.UserId(principal), ct)
+            ? id
+            : (Guid?)null;
+        if (draftId is { } kept
+            && await ArtifactAsync(db, f, kept, ct) is { } stored
+            && KeptAnswer(stored, hash) is { } json)
+            return Outcome.Ok(new AiDraftResponse
+            {
+                Output = JsonSerializer.Deserialize<JsonElement>(json),
+                Provider = await ai.PublicNameAsync(ct),
+                CompletedAtUtc = stored.CompletedAtUtc ?? stored.CreatedAtUtc,
+                Cached = true,
+            });
+
+        return await DraftInlineAsync(
+            f, prompt, principal, ai, quota, cache, caller, log, ct,
+            after: canonical => AiOutputs.AwardAtLeast(canonical, floor, out var problem) is { } held
+                ? (held, null)
+                : (null, problem),
+            onAnswered: draftId is { } draft
+                ? (canonical, answer) => KeepAsync(f, draft, hash, canonical, answer, ct)
+                : null);
+    }
+
+    /// <summary>
+    /// The answer a draft keeps, when it answers this very prompt: done, and
+    /// hashed the same — the prompt's version is in the hash, so a reworded
+    /// prompt asks again like a changed form does. Null means call.
+    /// </summary>
+    internal static string? KeptAnswer(AiArtifact stored, string hash) =>
+        stored is { Status: AiArtifactStatus.Done, OutputJson: { } json } && stored.InputHash == hash ? json : null;
+
+    /// <summary>
+    /// A form tool's answer kept with the saved draft it answered, in the
+    /// one row per feature and subject every AI draft has — the hash beside
+    /// it, so a changed form asks again. An answer from the hour's memory
+    /// has no call behind it to name, and is kept without one. A row that
+    /// fails to save is logged and left: the member already has their answer.
+    /// </summary>
+    private async Task KeepAsync(
+        AiFeature f, Guid draftId, string hash, string canonical, AiAnswer? answer, CancellationToken ct)
+    {
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var row = await db.AiArtifacts.SingleOrDefaultAsync(a => a.Feature == f && a.SubjectId == draftId, ct);
+            if (row is { Status: AiArtifactStatus.Done } && row.InputHash == hash) return;
+            if (row is null)
+                db.AiArtifacts.Add(row = new AiArtifact { Id = Guid.NewGuid(), Feature = f, SubjectId = draftId, CreatedAtUtc = now });
+            var tokens = answer?.Completion.Tokens;
+            row.Status = AiArtifactStatus.Done;
+            row.InputHash = hash;
+            row.OutputJson = canonical;
+            row.Provider = answer?.Provider;
+            row.Model = answer?.Model;
+            row.PromptVersion = AiPrompts.Version(f);
+            row.InputTokens = tokens is { } t ? (int)Math.Min(t.Input, int.MaxValue) : null;
+            row.OutputTokens = tokens is { } o ? (int)Math.Min(o.Output, int.MaxValue) : null;
+            row.Note = null;
+            row.Attempts = 0;
+            row.NextAttemptAtUtc = null;
+            row.CompletedAtUtc = now;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception e) when (e is DbUpdateException or InvalidOperationException)
+        {
+            log.LogWarning(e, "AI {Feature} answer for draft {Draft} was not kept.", f, draftId);
+        }
     }
 
     public async Task<Outcome<AiDraftResponse>> DraftProfileSummaryAsync(ProfileSummaryRequest request, ClaimsPrincipal principal, CancellationToken ct)
@@ -244,17 +335,25 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache
     /// (<see cref="AiCaller"/>). An unchanged form within
     /// the hour is answered from the inline cache without a call, and the
     /// answer goes through the same validation every queued draft does,
-    /// so nothing off-contract reaches a form.
+    /// so nothing off-contract reaches a form. A tool may hold the answer
+    /// to a rule only the portal knows (<paramref name="after"/>, before it
+    /// is cached) and keep it somewhere of its own once it passes
+    /// (<paramref name="onAnswered"/>).
     /// </summary>
     internal static async Task<Outcome<AiDraftResponse>> DraftInlineAsync(
         AiFeature f, (string System, string User) prompt, ClaimsPrincipal principal,
-        AiOptions ai, AiQuota quota, AiInlineCache cache, AiCaller caller, ILogger log, CancellationToken ct)
+        AiOptions ai, AiQuota quota, AiInlineCache cache, AiCaller caller, ILogger log, CancellationToken ct,
+        Func<string, (string? Json, string? Error)>? after = null,
+        Func<string, AiAnswer?, Task>? onAnswered = null)
     {
         var memberId = Principal.UserId(principal);
         var who = memberId is { } id ? AiSpender.Member(id, principal.IsInRole(Roles.Admin)) : AiSpender.Portal;
         var hash = AiRules.InputHash(f, prompt.System + "\n" + prompt.User);
         var now = DateTimeOffset.UtcNow;
         if (memberId is { } m && cache.Get(m, f, hash, now) is { } held)
+        {
+            // Asked before the draft was saved, kept now that it is.
+            if (onAnswered is not null) await onAnswered(held, null);
             return Outcome.Ok(new AiDraftResponse
             {
                 Output = JsonSerializer.Deserialize<JsonElement>(held),
@@ -262,6 +361,7 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache
                 CompletedAtUtc = now,
                 Cached = true,
             });
+        }
 
         var verdict = await quota.ConsumeAsync(who, ct);
         if (verdict == AiQuotaVerdict.MemberBurst)
@@ -294,10 +394,12 @@ public sealed partial class AiService(AiOptions ai, AiQuota quota, AiInlineCache
         await quota.SpendAsync(who, AiPrompts.FeatureName(f), answer.Provider, answer.Model, answer.Completion.Tokens ?? AiTokens.None, ct);
 
         var canonical = AiOutputs.Validate(f, answer.Completion.Text, out var error);
+        if (canonical is not null && after is not null) (canonical, error) = after(canonical);
         if (canonical is null)
             return Outcome.Conflict(error ?? "The answer did not match the expected shape.");
 
         if (memberId is { } member) cache.Put(member, f, hash, canonical, now);
+        if (onAnswered is not null) await onAnswered(canonical, answer);
         log.LogInformation("AI {Feature} drafted inline by {Provider}:{Model}{Standby}.",
             f, answer.Provider, answer.Model, answer.Standby ? " (standby)" : "");
         return Outcome.Ok(new AiDraftResponse

@@ -28,6 +28,7 @@ public static class EvalFeatures
         ["requirements"] = AiFeature.RequirementsSuggestion,
         ["criteria"] = AiFeature.CriteriaSuggestion,
         ["seo"] = AiFeature.SeoMetadata,
+        ["award"] = AiFeature.AwardSuggestion,
         ["work-kinds"] = AiFeature.RecommendedMatching,
         ["profile-summary"] = AiFeature.ProfileSummary,
         ["project-approach"] = AiFeature.ProjectApproach,
@@ -53,7 +54,8 @@ public static class EvalFeatures
     public static EvalJob Build(AiFeature feature, JsonElement input) => feature switch
     {
         AiFeature.CategorySuggestion or AiFeature.MilestoneExtraction or AiFeature.BriefCoach
-            or AiFeature.RequirementsSuggestion or AiFeature.CriteriaSuggestion or AiFeature.SeoMetadata => Form(feature, input),
+            or AiFeature.RequirementsSuggestion or AiFeature.CriteriaSuggestion or AiFeature.SeoMetadata
+            or AiFeature.AwardSuggestion => Form(feature, input),
         AiFeature.ProfileReview => Review(input),
         AiFeature.EntryDigest => Digest(input),
         AiFeature.RecommendedMatching => WorkKinds(input),
@@ -72,6 +74,11 @@ public static class EvalFeatures
             ?? throw new InvalidOperationException("the form is empty");
         if (AiInputs.Substance(form) < 30)
             throw new InvalidOperationException("the title and brief are too thin for the endpoint to spend a call on");
+        // The terms the server puts in for the award suggestion: the minimum
+        // award (the setting's default unless the case names one) and the
+        // default duration where the deadline is blank.
+        if (feature == AiFeature.AwardSuggestion)
+            form = form with { DurationDays = form.DurationDays ?? 14, MinimumAwardUsd = AwardFloor(input) };
         return new EvalJob(AiPrompts.ForForm(feature, form), AiInputs.OpportunityForm(form, AiFormReads.Of(feature)));
     }
 
@@ -195,6 +202,10 @@ public static class EvalFeatures
     /// form is paid by milestone and names one; null otherwise, when the
     /// draft must carry no amounts at all.
     /// </summary>
+    /// <summary>The portal's minimum award a case is run under: its own <c>portalMinimumAwardUsd</c>, else the setting's default.</summary>
+    public static decimal AwardFloor(JsonElement input) =>
+        input.TryGetProperty("portalMinimumAwardUsd", out var floor) && floor.ValueKind == JsonValueKind.Number ? floor.GetDecimal() : 100;
+
     public static decimal? MilestoneBudget(JsonElement input)
     {
         var form = input.Deserialize<OpportunityFormSnapshot>(Json);

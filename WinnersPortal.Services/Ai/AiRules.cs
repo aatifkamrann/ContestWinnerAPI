@@ -140,7 +140,7 @@ public static class AiFeatureRoutes
 
     /// <summary>
     /// The tools that read the opportunity form as it stands, answered inside
-    /// the request. All six take the same input — the form on screen
+    /// the request. All seven take the same input — the form on screen
     /// (<see cref="OpportunityFormSnapshot"/>) — which is exactly why none of
     /// them needs an opportunity to exist first; each reads the part of it that
     /// sits above the section it fills (<see cref="AiFormReads"/>).
@@ -153,6 +153,7 @@ public static class AiFeatureRoutes
         "milestones" => AiFeature.MilestoneExtraction,
         "criteria" => AiFeature.CriteriaSuggestion,
         "seo" => AiFeature.SeoMetadata,
+        "award" => AiFeature.AwardSuggestion,
         _ => null,
     };
 }
@@ -182,10 +183,23 @@ public enum FormPart
     Criteria = 128,
     /// <summary>How the opportunity pays: paid by milestone, with the total the milestones share. Absent on a competitive one.</summary>
     Pay = 256,
+    /// <summary>
+    /// The terms an award is weighed against, without the award itself: how
+    /// it pays (by kind, never by amount), the opportunity duration, the merit
+    /// floor and the portal's minimum award. Read by the award suggestion
+    /// alone — the client's own figure is never sent, so the model cannot
+    /// anchor on it.
+    /// </summary>
+    Terms = 512,
 }
 
 public static class AiFormReads
 {
+    /// <summary>
+    /// The whole form as the coach reads it. The award's terms are not in
+    /// it: they are the award suggestion's input, and the coach reads the
+    /// form as it always has.
+    /// </summary>
     public const FormPart Everything = FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Skills
         | FormPart.Requirements | FormPart.Delivery | FormPart.Milestones | FormPart.Criteria | FormPart.Pay;
 
@@ -204,6 +218,10 @@ public static class AiFormReads
         AiFeature.CriteriaSuggestion => FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Requirements
             | FormPart.Delivery | FormPart.Milestones,
         AiFeature.SeoMetadata => FormPart.Title | FormPart.Brief | FormPart.Kind,
+        // Everything above Award and dates, and the clock beside it; the
+        // milestones and the rubric sit below and are not read.
+        AiFeature.AwardSuggestion => FormPart.Title | FormPart.Brief | FormPart.Kind | FormPart.Skills
+            | FormPart.Requirements | FormPart.Delivery | FormPart.Terms,
         _ => throw new ArgumentOutOfRangeException(
             nameof(feature), feature, "That feature does not read the opportunity form."),
     };

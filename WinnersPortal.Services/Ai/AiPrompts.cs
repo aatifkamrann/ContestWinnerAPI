@@ -48,6 +48,7 @@ public static class AiPrompts
         AiFeature.ApplicationEvaluation => 2,
         AiFeature.RequirementsSuggestion => 2,
         AiFeature.CriteriaSuggestion => 2,
+        AiFeature.AwardSuggestion => 1,
         _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, "That feature has no prompt."),
     };
 
@@ -160,6 +161,34 @@ public static class AiPrompts
         "the milestones and what the brief calls done — never from who the entrant is. " +
         "Shape: {\"criteria\":[{\"title\":string,\"points\":number,\"description\":string}]}. title in one " +
         "to four words; description one line, under 120 characters, saying how the line is judged." + FormRule,
+        Data("The opportunity form so far", formJson));
+
+    /// <summary>
+    /// The award suggestion: three figures the client chooses between, each
+    /// with what it buys, estimated from the work the form describes and the
+    /// terms set above the award. The client's own figure is not in the
+    /// input; where it sits among the three is the form's arithmetic, never
+    /// the model's verdict.
+    /// </summary>
+    public static (string System, string User) Award(string formJson) => (
+        HouseRules + " Task: estimate what a draft opportunity should pay, as three figures the client chooses " +
+        "between before publishing — you suggest, the client sets the award. low is the least that would still " +
+        "draw serious freelancers for this scope: below it, few would think it worth their time. competitive is " +
+        "in line with what work of this scope, these skills and this timeline usually pays a capable " +
+        "freelancer. attractive is clearly above that: it draws more applicants and more experienced ones, and " +
+        "is worth it where the time is short or the merit floor is high. Price the work the brief and the " +
+        "requirements describe, for the skills they need, in the time the terms give. Where the opportunity is " +
+        "a competition, every selected entrant builds the work and only the winner is paid, so the award must " +
+        "outweigh the chance of not winning — more than a single contract for the same work would pay. Where " +
+        "one freelancer is hired and paid milestone by milestone, the figure is the whole job's fixed price. " +
+        "Whole US dollars, rounded the way people price work, rising strictly from low to attractive, and never " +
+        "below the portal's minimum award given in the terms. Shape: {\"effort\":string," +
+        "\"low\":{\"amountUsd\":integer,\"why\":string},\"competitive\":{\"amountUsd\":integer,\"why\":string}," +
+        "\"attractive\":{\"amountUsd\":integer,\"why\":string},\"confident\":boolean}. effort is one sentence " +
+        "sizing the work — what it takes and for whom; an estimate of the hours is welcome. Each why is one " +
+        "sentence under 140 characters saying what that figure buys; no sentence names money — the amounts are " +
+        "shown beside them. confident is false when the brief is too thin to size the work, and the client is " +
+        "shown that." + FormRule,
         Data("The opportunity form so far", formJson));
 
     public static (string System, string User) Digest(string inputJson) => (
@@ -301,7 +330,7 @@ public static class AiPrompts
 
     /// <summary>
     /// The prompt for a tool that reads the opportunity form. One place, so the
-    /// endpoint that serves all six stays a gate and a call and nothing
+    /// endpoint that serves all seven stays a gate and a call and nothing
     /// else — and so a feature that has no form prompt cannot reach it.
     /// Each is handed the sections above the one it fills and no more
     /// (<see cref="AiFormReads"/>), serialised by <see cref="AiInputs.OpportunityForm"/>.
@@ -317,6 +346,7 @@ public static class AiPrompts
             AiFeature.MilestoneExtraction => Milestones(json),
             AiFeature.CriteriaSuggestion => Criteria(json),
             AiFeature.SeoMetadata => Seo(json),
+            AiFeature.AwardSuggestion => Award(json),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(feature), feature, "That feature does not read the opportunity form."),
         };
@@ -343,6 +373,7 @@ public static class AiPrompts
         AiFeature.MilestoneExtraction => Milestones(InputPlaceholder),
         AiFeature.CriteriaSuggestion => Criteria(InputPlaceholder),
         AiFeature.SeoMetadata => Seo(InputPlaceholder),
+        AiFeature.AwardSuggestion => Award(InputPlaceholder),
         AiFeature.EntryDigest => Digest(InputPlaceholder),
         AiFeature.ProgressNarrative => Narrative(InputPlaceholder),
         AiFeature.StandingNotes => Standing(InputPlaceholder),
@@ -467,6 +498,23 @@ public static class AiInputs
                 paidBy = "milestone",
                 totalBudgetUsd = r.AwardAmount is > 0 and var total ? decimal.Round(total, 2) : (decimal?)null,
             });
+
+        // The award's terms, for the award suggestion alone: how it pays in
+        // words, the clock, the door and the portal's floor — never the
+        // client's own figure, which the suggestion must not anchor on.
+        if ((parts & FormPart.Terms) != 0)
+        {
+            var terms = new Dictionary<string, object?>
+            {
+                ["paidAs"] = Opportunities.MilestonePay.ParseKind(r.Kind) == OpportunityKind.Milestones
+                    ? "one hired freelancer, paid milestone by milestone"
+                    : "one award to the winning entry — every selected entrant builds the work",
+            };
+            if (r.DurationDays is > 0 and var days) terms["durationDays"] = Math.Min(days, 3650);
+            if (r.MinMeritScore is > 0 and var merit) terms["minimumMeritScore"] = Math.Min(merit, 100);
+            if (r.MinimumAwardUsd is > 0 and var least) terms["portalMinimumAwardUsd"] = decimal.Round(least, 0);
+            form["terms"] = terms;
+        }
 
         var criteria = (r.Criteria ?? [])
             .Where(c => !string.IsNullOrWhiteSpace(c.Title))
@@ -958,13 +1006,14 @@ public sealed record SummaryProject(
 
 /// <summary>
 /// The opportunity form as the form-reading tools receive it, saved or not —
-/// the whole form on every request, so one shape serves all six tools
+/// the whole form on every request, so one shape serves all seven tools
 /// and the browser has one thing to send; which parts a tool actually
 /// reads is <see cref="AiFormReads"/>, applied on this side. Keys as the
-/// form holds them (category, delivery); the prompt gets labels. No dates,
-/// and the award only on an opportunity paid by milestone, where the
-/// milestone draft splits the client's own total — nothing here invents
-/// money or a schedule.
+/// form holds them (category, delivery); the prompt gets labels. No dates —
+/// the award suggestion reads the duration in days, nothing finer — and the
+/// award only on an opportunity paid by milestone, where the milestone
+/// draft splits the client's own total; the award suggestion never reads
+/// it.
 /// </summary>
 public sealed record OpportunityFormSnapshot(
     string? Title,
@@ -981,7 +1030,22 @@ public sealed record OpportunityFormSnapshot(
     /// <summary>"competitive" or "milestones"; blank is competitive.</summary>
     string? Kind = null,
     /// <summary>The award — paid by milestone, the total the draft splits. Read only then.</summary>
-    decimal? AwardAmount = null);
+    decimal? AwardAmount = null,
+    /// <summary>Whole days from the start to the deadline; blank while the deadline is, and the server reads the portal's default.</summary>
+    int? DurationDays = null,
+    /// <summary>The merit score an entrant needs; blank or 0 is no minimum.</summary>
+    int? MinMeritScore = null,
+    /// <summary>The saved draft this form is, if it is one: the award suggestion is kept with it. Never part of a prompt.</summary>
+    Guid? DraftId = null)
+{
+    /// <summary>
+    /// The portal's minimum award, put here by the server from its own
+    /// setting before the award suggestion's prompt is built — never read
+    /// from the request.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public decimal? MinimumAwardUsd { get; init; }
+}
 
 public sealed record FormRequirement(string? Title, string? Detail);
 

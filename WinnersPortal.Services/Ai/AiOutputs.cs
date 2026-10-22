@@ -57,6 +57,7 @@ public static class AiOutputs
                     AiFeature.ApplicationEvaluation => ApplicationEvaluation(doc.RootElement, out error),
                     AiFeature.RequirementsSuggestion => Requirements(doc.RootElement, out error),
                     AiFeature.CriteriaSuggestion => Criteria(doc.RootElement, out error),
+                    AiFeature.AwardSuggestion => Award(doc.RootElement, out error),
                     _ => Fail("This feature has no provider output.", out error),
                 };
             }
@@ -127,12 +128,59 @@ public static class AiOutputs
             AiFeature.CriteriaSuggestion => AiSchema.Obj(
                 ("criteria", AiSchema.Arr(AiSchema.Obj(
                     ("title", AiSchema.Str), ("points", AiSchema.Int), ("description", AiSchema.Str))))),
+            AiFeature.AwardSuggestion => AiSchema.Obj(
+                ("effort", AiSchema.Str),
+                ("low", AwardTierSchema), ("competitive", AwardTierSchema), ("attractive", AwardTierSchema),
+                ("confident", AiSchema.Bool)),
             _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, "This feature has no provider output."),
         };
     }
 
     /// <summary>The settings test's answer, <c>{"ok":true}</c>.</summary>
     public static object PingSchema => AiSchema.Obj(("ok", AiSchema.Bool));
+
+    private static object AwardTierSchema => AiSchema.Obj(("amountUsd", AiSchema.Int), ("why", AiSchema.Str));
+
+    /// <summary>The award suggestion's three figures, in the order a client reads them.</summary>
+    public static readonly string[] AwardTiers = ["low", "competitive", "attractive"];
+
+    /// <summary>
+    /// Money said in words: a currency mark, the code, the word. The award's
+    /// figures stand beside its sentences, and a sentence carrying one is a
+    /// sentence that can disagree with them.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex Money = new(
+        @"[$€£₹]|\bUSD\b|\bdollars?\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// The text with every sentence that names money taken out, the rest
+    /// left as it was — what the figures beside it say is the portal's to
+    /// show, and a sentence that was all money leaves nothing behind.
+    /// </summary>
+    internal static string WithoutMoney(string text) =>
+        string.Join(' ', System.Text.RegularExpressions.Regex.Split(text.Trim(), @"(?<=[.!?])\s+")
+            .Where(s => s.Length > 0 && !Money.IsMatch(s))).Trim();
+
+    /// <summary>
+    /// The portal's minimum award applied to a validated award suggestion —
+    /// the repair the portal can prove. A low figure under the minimum is
+    /// raised to it, since nothing under it can be published; an answer
+    /// whose competitive figure is under it is refused, its whole scale
+    /// below anything the client may set. No floor leaves it as it is.
+    /// </summary>
+    public static string? AwardAtLeast(string canonical, decimal floor, out string? error)
+    {
+        error = null;
+        if (floor <= 0) return canonical;
+        var least = (long)decimal.Ceiling(floor);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(canonical)!.AsObject();
+        long Amount(string tier) => root[tier]!["amountUsd"]!.GetValue<long>();
+        if (Amount("competitive") <= least)
+            return Fail("The suggestion came in at or under the portal's minimum award — ask again.", out error);
+        if (Amount("low") < least) root["low"]!["amountUsd"] = least;
+        return root.ToJsonString();
+    }
 
     private static string? Fail(string message, out string? error)
     {
@@ -498,6 +546,48 @@ public static class AiOutputs
     /// the largest fractions first, and no line ever rounded down to zero.
     /// A list that already adds up to a hundred comes back untouched.
     /// </summary>
+    /// <summary>
+    /// The award suggestion: three figures in whole dollars, rising from low
+    /// to attractive, each with what it buys, and a sentence on what the
+    /// work takes. A missing figure, one the portal cannot hold or a scale
+    /// that does not rise is refused — reordering would hand one figure
+    /// another's reason. The sentences lose any part that names money; the
+    /// figures are the only money the client reads.
+    /// </summary>
+    private static string? Award(JsonElement root, out string? error)
+    {
+        error = null;
+        var tiers = new Dictionary<string, object>();
+        long last = 0;
+        foreach (var name in AwardTiers)
+        {
+            if (!root.TryGetProperty(name, out var tier) || tier.ValueKind != JsonValueKind.Object
+                || !tier.TryGetProperty("amountUsd", out var a) || a.ValueKind != JsonValueKind.Number
+                || !a.TryGetDecimal(out var raw))
+                return Fail($"The suggestion came back without a {name} figure.", out error);
+            var rounded = decimal.Round(raw, 0, MidpointRounding.AwayFromZero);
+            if (rounded <= 0 || rounded > Opportunities.MilestonePay.MaxAmount)
+                return Fail($"The {name} figure is not an amount the portal can hold.", out error);
+            var amount = (long)rounded;
+            if (amount <= last)
+                return Fail("The suggested figures did not rise from low to attractive.", out error);
+            last = amount;
+            tiers[name] = new { amountUsd = amount, why = NullIfEmpty(Cut(WithoutMoney(Str(tier, "why")), 200)) };
+        }
+        var effort = NullIfEmpty(Cut(WithoutMoney(Str(root, "effort")), 300));
+        if (effort is null) return Fail("The suggestion did not say what the work takes.", out error);
+        // Missing reads as sure: only a plain false puts the thin-brief line on screen.
+        var confident = !(root.TryGetProperty("confident", out var c) && c.ValueKind == JsonValueKind.False);
+        return JsonSerializer.Serialize(new
+        {
+            effort,
+            low = tiers["low"],
+            competitive = tiers["competitive"],
+            attractive = tiers["attractive"],
+            confident,
+        });
+    }
+
     internal static int[] ToHundred(int[] points)
     {
         var total = points.Sum();

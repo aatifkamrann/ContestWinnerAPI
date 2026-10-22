@@ -184,8 +184,14 @@ public class AiPrivacyTests
     [MemberData(nameof(AiTests.PromptedFeatures), MemberType = typeof(AiTests))]
     public void Every_prompt_moved_past_its_first_version_with_the_data_rule(AiFeature feature)
     {
+        // A prompt written after the move carries the rule from its first
+        // wording (the template test checks the markers on every prompt).
+        if (BornWithTheDataRule.Contains(feature)) return;
         Assert.True(AiPrompts.Version(feature) >= 2, $"{feature} is still at v{AiPrompts.Version(feature)}");
     }
+
+    /// <summary>The prompts first written with the data markers already in them, at v1.</summary>
+    private static readonly AiFeature[] BornWithTheDataRule = [AiFeature.AwardSuggestion];
 
     // ------------------------------------------------------- the policy
 

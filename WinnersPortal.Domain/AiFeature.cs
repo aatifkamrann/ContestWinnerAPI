@@ -82,4 +82,14 @@ public enum AiFeature
     /// it. The client edits it before publishing; never applied for them.
     /// </summary>
     CriteriaSuggestion,
+
+    /// <summary>
+    /// Three award figures for an opportunity form — low, competitive and
+    /// attractive, each with its reason — estimated from the brief and the
+    /// terms set above the award, never from the client's own figure. Where
+    /// the client's award sits among them is the portal's arithmetic, shown
+    /// beside the field and again in the publish dialog. A suggestion to
+    /// pick from or ignore; the client sets the award.
+    /// </summary>
+    AwardSuggestion,
 }

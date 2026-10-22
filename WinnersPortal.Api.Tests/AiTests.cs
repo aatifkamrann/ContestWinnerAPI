@@ -229,6 +229,7 @@ public class AiTests
     [InlineData("milestones", AiFeature.MilestoneExtraction)]
     [InlineData("criteria", AiFeature.CriteriaSuggestion)]
     [InlineData("seo", AiFeature.SeoMetadata)]
+    [InlineData("award", AiFeature.AwardSuggestion)]
     public void Form_slugs_route_to_the_tools_that_read_the_opportunity_form(string slug, AiFeature expected)
     {
         Assert.Equal(expected, AiFeatureRoutes.FromFormSlug(slug));
@@ -263,12 +264,57 @@ public class AiTests
     [InlineData(AiFeature.MilestoneExtraction, "TypeScript 5", "Checkout works")]
     [InlineData(AiFeature.CriteriaSuggestion, "Checkout works", "Functionality")]
     [InlineData(AiFeature.SeoMetadata, "Web", "Postgres")]
+    [InlineData(AiFeature.AwardSuggestion, "TypeScript 5", "Checkout works")]
     public void A_form_tool_is_handed_the_sections_above_the_one_it_fills_and_nothing_below(
         AiFeature feature, string above, string below)
     {
         var (_, user) = AiPrompts.ForForm(feature, ShopForm);
         Assert.Contains(above, user);
         Assert.DoesNotContain(below, user);
+    }
+
+    [Fact]
+    public void The_award_suggestion_reads_the_terms_and_never_the_clients_own_figure()
+    {
+        var form = ShopForm with
+        {
+            Kind = "milestones", AwardAmount = 4321, DurationDays = 10, MinMeritScore = 60,
+            DraftId = Guid.Parse("11111111-2222-3333-4444-555555555555"), MinimumAwardUsd = 150,
+        };
+        var (_, user) = AiPrompts.ForForm(AiFeature.AwardSuggestion, form);
+        Assert.Contains("one hired freelancer, paid milestone by milestone", user);
+        Assert.Contains("\"durationDays\":10", user);
+        Assert.Contains("\"minimumMeritScore\":60", user);
+        Assert.Contains("\"portalMinimumAwardUsd\":150", user);
+        // The figure it is weighed against, and the row it is kept in, never travel.
+        Assert.DoesNotContain("4321", user);
+        Assert.DoesNotContain("11111111", user);
+        Assert.Contains("one award to the winning entry", AiPrompts.ForForm(AiFeature.AwardSuggestion, ShopForm).User);
+
+        // Every other tool reads the form as it always has.
+        foreach (var other in new[]
+                 {
+                     AiFeature.CategorySuggestion, AiFeature.BriefCoach, AiFeature.RequirementsSuggestion,
+                     AiFeature.MilestoneExtraction, AiFeature.CriteriaSuggestion, AiFeature.SeoMetadata,
+                 })
+            Assert.DoesNotContain("\"terms\"", AiPrompts.ForForm(other, form).User);
+        // And the server's floor is never taken from a request.
+        var bound = JsonSerializer.Deserialize<OpportunityFormSnapshot>(
+            "{\"title\":\"A shop\",\"minimumAwardUsd\":1}", new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Null(bound!.MinimumAwardUsd);
+    }
+
+    [Fact]
+    public void A_draft_keeps_the_award_answer_to_the_same_prompt_only()
+    {
+        var stored = new AiArtifact
+        {
+            Feature = AiFeature.AwardSuggestion, Status = AiArtifactStatus.Done, InputHash = "abc", OutputJson = "{\"effort\":\"x\"}",
+        };
+        Assert.Equal("{\"effort\":\"x\"}", AiService.KeptAnswer(stored, "abc"));
+        Assert.Null(AiService.KeptAnswer(stored, "abd"));
+        stored.Status = AiArtifactStatus.Failed;
+        Assert.Null(AiService.KeptAnswer(stored, "abc"));
     }
 
     [Fact]
@@ -588,6 +634,61 @@ public class AiTests
 
         Assert.Null(AiOutputs.Validate(AiFeature.CriteriaSuggestion, "{\"criteria\":[]}", out var none));
         Assert.NotNull(none);
+    }
+
+    [Fact]
+    public void Award_output_rises_in_whole_dollars_and_keeps_money_out_of_its_words()
+    {
+        var canonical = AiOutputs.Validate(AiFeature.AwardSuggestion,
+            "{\"effort\":\"About 30 hours for one React developer. Roughly $1,200 of work.\"," +
+            "\"low\":{\"amountUsd\":399.6,\"why\":\"Covers the build at a modest rate.\"}," +
+            "\"competitive\":{\"amountUsd\":750,\"why\":\"What a dashboard like this usually pays. That is $750.\"}," +
+            "\"attractive\":{\"amountUsd\":1200,\"why\":\"Costs 1200 USD.\"},\"confident\":false}", out var error);
+        Assert.Null(error);
+        using var doc = JsonDocument.Parse(canonical!);
+        var root = doc.RootElement;
+        Assert.Equal(400, root.GetProperty("low").GetProperty("amountUsd").GetInt64());
+        Assert.Equal(1200, root.GetProperty("attractive").GetProperty("amountUsd").GetInt64());
+        // A sentence that names money goes; what is left stands.
+        Assert.Equal("About 30 hours for one React developer.", root.GetProperty("effort").GetString());
+        Assert.Equal("What a dashboard like this usually pays.", root.GetProperty("competitive").GetProperty("why").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("attractive").GetProperty("why").ValueKind);
+        Assert.False(root.GetProperty("confident").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("""{"effort":"x","low":{"amountUsd":500,"why":"a"},"competitive":{"amountUsd":400,"why":"b"},"attractive":{"amountUsd":900,"why":"c"}}""")]
+    [InlineData("""{"effort":"x","low":{"amountUsd":500,"why":"a"},"attractive":{"amountUsd":900,"why":"c"}}""")]
+    [InlineData("""{"effort":"x","low":{"amountUsd":0,"why":"a"},"competitive":{"amountUsd":400,"why":"b"},"attractive":{"amountUsd":900,"why":"c"}}""")]
+    [InlineData("""{"effort":"x","low":{"amountUsd":400,"why":"a"},"competitive":{"amountUsd":400,"why":"b"},"attractive":{"amountUsd":900,"why":"c"}}""")]
+    [InlineData("""{"effort":"It is $500 of work.","low":{"amountUsd":300,"why":"a"},"competitive":{"amountUsd":400,"why":"b"},"attractive":{"amountUsd":900,"why":"c"}}""")]
+    public void An_award_answer_that_does_not_rise_or_size_the_work_is_refused(string answer)
+    {
+        // Falling, a figure missing, nothing at all, two the same, and no
+        // sentence about the work once its money is taken out.
+        Assert.Null(AiOutputs.Validate(AiFeature.AwardSuggestion, answer, out var error));
+        Assert.NotNull(error);
+    }
+
+    [Fact]
+    public void The_portal_minimum_lifts_a_low_figure_and_refuses_a_scale_beneath_it()
+    {
+        static string Answer(int low, int competitive, int attractive) => AiOutputs.Validate(AiFeature.AwardSuggestion,
+            $$"""{"effort":"A day's work.","low":{"amountUsd":{{low}},"why":"a"},"competitive":{"amountUsd":{{competitive}},"why":"b"},"attractive":{"amountUsd":{{attractive}},"why":"c"},"confident":true}""",
+            out _)!;
+
+        var lifted = AiOutputs.AwardAtLeast(Answer(80, 300, 600), 100, out var error);
+        Assert.Null(error);
+        using (var doc = JsonDocument.Parse(lifted!))
+        {
+            Assert.Equal(100, doc.RootElement.GetProperty("low").GetProperty("amountUsd").GetInt64());
+            Assert.Equal(300, doc.RootElement.GetProperty("competitive").GetProperty("amountUsd").GetInt64());
+        }
+
+        Assert.Null(AiOutputs.AwardAtLeast(Answer(50, 90, 200), 100, out var refused));
+        Assert.NotNull(refused);
+        var untouched = Answer(80, 300, 600);
+        Assert.Equal(untouched, AiOutputs.AwardAtLeast(untouched, 0, out _));
     }
 
     [Theory]

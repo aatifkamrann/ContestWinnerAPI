@@ -38,13 +38,14 @@ public sealed class AiController(AiService aiService) : ControllerBase
                 Evaluation = await ai.IsFeatureEnabledAsync(AiFeature.ApplicationEvaluation, ct),
                 Requirements = await ai.IsFeatureEnabledAsync(AiFeature.RequirementsSuggestion, ct),
                 Criteria = await ai.IsFeatureEnabledAsync(AiFeature.CriteriaSuggestion, ct),
+                Award = await ai.IsFeatureEnabledAsync(AiFeature.AwardSuggestion, ct),
             },
         });
     }
 
     // --------------------------------- the tools that read the form
     // Everything else here queues a job, because everything else reads
-    // something the portal already stores. These six read the opportunity
+    // something the portal already stores. These seven read the opportunity
     // form on screen: the whole form travels in the request, so they
     // work while an opportunity is being posted, before there is any row to
     // be about — and they answer what the client is looking at rather
@@ -147,4 +148,5 @@ public sealed record AiFeatureSwitches
     public required bool Evaluation { get; init; }
     public required bool Requirements { get; init; }
     public required bool Criteria { get; init; }
+    public required bool Award { get; init; }
 }

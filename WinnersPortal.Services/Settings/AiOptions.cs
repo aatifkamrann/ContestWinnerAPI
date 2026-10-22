@@ -43,6 +43,7 @@ public sealed class AiOptions(SettingsService settings)
             AiFeature.ApplicationEvaluation => "ai.features.applicationEvaluation",
             AiFeature.RequirementsSuggestion => "ai.features.requirementsSuggestion",
             AiFeature.CriteriaSuggestion => "ai.features.criteriaSuggestion",
+            AiFeature.AwardSuggestion => "ai.features.awardSuggestion",
             _ => throw new ArgumentOutOfRangeException(nameof(feature)),
         };
 

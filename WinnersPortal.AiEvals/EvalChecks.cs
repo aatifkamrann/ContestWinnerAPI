@@ -97,6 +97,23 @@ public static class EvalChecks
                     if ((Str(r, "description") ?? "").Length >= 120) yield return $"criterion \"{title}\" has a description of 120 characters or more";
                 }
                 break;
+            case AiFeature.AwardSuggestion:
+            {
+                // What the portal holds the answer to besides the gate: the
+                // minimum award, one sentence on the work, each reason a line.
+                var floor = EvalFeatures.AwardFloor(c.Input);
+                var low = root.GetProperty("low").GetProperty("amountUsd").GetDecimal();
+                if (low < floor) yield return $"the low figure is {low:0}, under the portal's minimum award of {floor:0}";
+                var effort = Str(root, "effort") ?? "";
+                if (Sentences(effort) > 1) yield return $"effort has {Sentences(effort)} sentences; the prompt asks for one";
+                foreach (var tier in AiOutputs.AwardTiers)
+                {
+                    var why = Str(root.GetProperty(tier), "why");
+                    if (why is null) yield return $"the {tier} figure came back without a reason";
+                    else if (why.Length >= 140) yield return $"the {tier} reason is {why.Length} characters; the prompt asks for under 140";
+                }
+                break;
+            }
             case AiFeature.SeoMetadata:
             {
                 var title = Str(root, "title") ?? "";
@@ -228,6 +245,14 @@ public static class EvalChecks
                 : 0;
             if (e.MinCount is { } min && count < min) yield return $"{list ?? "the list"} has {count} items, expected at least {min}";
             if (e.MaxCount is { } max && count > max) yield return $"{list ?? "the list"} has {count} items, expected at most {max}";
+        }
+
+        if (e.CompetitiveBetween is { } range && root.TryGetProperty("competitive", out var competitive)
+            && competitive.ValueKind == JsonValueKind.Object && competitive.TryGetProperty("amountUsd", out var amount))
+        {
+            var got = amount.GetDecimal();
+            if (got < range.Low || got > range.High)
+                yield return $"the competitive figure is {got:0}, expected {range.Low:0} to {range.High:0}";
         }
 
         var texts = Texts(root).ToList();

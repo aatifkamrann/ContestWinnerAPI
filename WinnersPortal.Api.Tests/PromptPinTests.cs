@@ -136,6 +136,7 @@ public class PromptPinTests
     [InlineData(AiFeature.MilestoneExtraction)]
     [InlineData(AiFeature.CriteriaSuggestion)]
     [InlineData(AiFeature.SeoMetadata)]
+    [InlineData(AiFeature.AwardSuggestion)]
     public void The_template_is_the_wording_the_form_tools_send(AiFeature feature)
     {
         var form = new OpportunityFormSnapshot("A shop", "Build me a storefront with a cart, a checkout and an order list for staff.",

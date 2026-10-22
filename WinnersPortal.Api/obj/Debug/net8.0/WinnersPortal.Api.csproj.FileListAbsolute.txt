@@ -191,7 +191,7 @@ D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Api\bin\Debug\net8.0\Microsof
 D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Api\bin\Debug\net8.0\Polly.Core.dll
 D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Api\bin\Debug\net8.0\Polly.Extensions.dll
 D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Api\bin\Debug\net8.0\Polly.RateLimiting.dll
-D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Api\obj\Debug\net8.0\swae.build.ex.cache
+D:\Projects\Astrik\WinnersPortal\src\WinnersPortal.Api\obj\Debug\net8.0\staticwebassets.upToDateCheck.txt
 D:\Projects\Astrik\FreelanceContest\ContestWinnerAPI\WinnersPortal.Api\bin\Debug\net8.0\appsettings.json
 D:\Projects\Astrik\FreelanceContest\ContestWinnerAPI\WinnersPortal.Api\bin\Debug\net8.0\WinnersPortal.Api.staticwebassets.endpoints.json
 D:\Projects\Astrik\FreelanceContest\ContestWinnerAPI\WinnersPortal.Api\bin\Debug\net8.0\WinnersPortal.Api.exe

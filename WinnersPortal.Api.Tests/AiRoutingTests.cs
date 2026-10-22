@@ -286,7 +286,7 @@ public class AiRoutingTests
         Assert.StartsWith("Line 1 of model per feature names a feature the portal does not have (spamFilter)", unknown);
         Assert.Contains("categorySuggestion", unknown);
         Assert.StartsWith("Line 1 of model per feature names a model longer than", AiFeatureModels.Problem("entryDigest " + new string('m', 101)));
-        Assert.Equal(14, AiFeatureModels.FeatureNames.Count);
+        Assert.Equal(15, AiFeatureModels.FeatureNames.Count);
         Assert.DoesNotContain("spamFilter", AiFeatureModels.FeatureNames);
 
         // The same door every AI setting is checked through, and the row on the AI group.

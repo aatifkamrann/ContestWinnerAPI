@@ -337,6 +337,23 @@ public static class HelpRegistry
             Why: "A rubric written after the entries arrive is a rubric written around them. Drafting it from "
                  + "the brief, before publishing, is what makes the promise to entrants a real one."),
 
+        new("settings.ai.features.awardSuggestion",
+            "Suggests three award figures on the opportunity form and checks the award against them at publish.",
+            "On the opportunity form, under Award (USD) — Total (USD) when it pays by milestone — on create and "
+            + "on edit alike: the client presses once, the model reads the brief and the terms set above the "
+            + "award as they stand on the form, and offers a low, a competitive and an attractive figure in "
+            + "whole dollars, each with what it buys. The client's own figure is never sent. Where the award "
+            + "sits among the three is the portal's arithmetic, shown beside the field and again in the publish "
+            + "dialog, with whether the award is a suggested figure or the client's own. Nothing is set for them "
+            + "and nothing is refused: the dialog informs, the client decides.\n\n"
+            + "One provider call per press, answered inside the request. Publish asks again only when something "
+            + "the suggestion reads has changed, and a saved draft keeps its answer, so an unchanged draft is "
+            + "checked for nothing. No figure falls below the minimum award setting. Switched off, the field "
+            + "and the publish dialog are as they were.",
+            Why: "A client new to the portal has no feel for what work pays here, and an award set too low is an "
+                 + "opportunity nobody enters. Three figures with reasons, before the award is locked, is a cheap "
+                 + "answer to that."),
+
         new("settings." + Ai.AiPrices.Key,
             "Each model's price per million tokens sent and per million answered, in US dollars, from the provider's page.",
             "A token is the unit every provider bills by: roughly three-quarters of a word of English, more for "
@@ -386,7 +403,7 @@ public static class HelpRegistry
             "Every feature asks the active setup's model unless a line here names another for it — "
             + "\"categorySuggestion gemini-3.6-flash-lite\". The names are the switches' own, as Operations → AI usage "
             + "lists them: categorySuggestion, briefCoach, requirementsSuggestion, "
-            + "milestoneExtraction, criteriaSuggestion, seoMetadata, profileSummary, projectApproach, entryDigest, "
+            + "milestoneExtraction, criteriaSuggestion, awardSuggestion, seoMetadata, profileSummary, projectApproach, entryDigest, "
             + "progressNarrative, standingNotes, profileReview, applicationEvaluation, recommendedMatching. Lines "
             + "starting with # are notes; a line that cannot be read, or names a feature the portal does not have, "
             + "is refused rather than skipped.\n\n"
@@ -1429,7 +1446,9 @@ public static class HelpRegistry
             + "and the winner is paid exactly this amount after you review their code. Paid by milestone, it is "
             + "the total of the job, and the milestones' amounts must add up to it.\n\n"
             + "Set it for the work you are asking, not the minimum the form accepts — the award is the only thing "
-            + "competing for entrants' time against every other open opportunity.",
+            + "competing for entrants' time against every other open opportunity. Where the portal suggests "
+            + "awards, Suggest an award under the field offers a low, a competitive and an attractive figure "
+            + "for this brief, and Publish checks yours against them again.",
             Why: "This is a public commitment. It is shown on every card in the feed, it cannot be lowered after "
                  + "publishing, and your payment record on it follows your account.",
             Example: "750"),
@@ -1927,7 +1946,10 @@ public static class HelpRegistry
             "Publishing lists the opportunity publicly and locks the brief, milestones, deadline, and award.",
             "A draft is yours to edit and invisible to everyone else. Publishing puts it in the feed, opens entry, "
             + "and freezes its terms — from that moment, freelancers are spending real time against them.\n\n"
-            + "Read the brief once more as a stranger would before you press this.",
+            + "Read the brief once more as a stranger would before you press this. Where the portal suggests "
+            + "awards, the confirmation also says whether yours sits low, competitive or attractive for this "
+            + "brief, and whether it is a suggested figure or your own — a word before the door, never a "
+            + "condition of it.",
             Why: "This is the one-way door in the opportunity lifecycle. Changing terms under entrants who already "
                  + "committed is not supported — that protection is what makes entering worth anyone's while."),
 
@@ -2368,6 +2390,23 @@ public static class HelpRegistry
             + "changed.",
             Why: "The rubric is what you promise to choose by. Written from the brief before anyone enters, it "
                  + "is a promise; written around the entries afterwards, it is not."),
+
+        new("opportunity.aiAward",
+            "Suggests a low, a competitive and an attractive award from the brief and the terms above it.",
+            "Reads the title, the brief, the kind of work, the required skills and merit score, the technical "
+            + "requirements, how work is handed in, how it pays and how long it runs — as they stand on this "
+            + "form, saved or not — and offers three whole-dollar figures, each with what it buys, and a line on "
+            + "what the work takes. Your own figure is not sent, so the suggestion cannot lean on it. \"Use\" "
+            + "puts a figure in the field; it stays yours to change until you publish.\n\n"
+            + "Publish checks the award against the suggestion again: whether it sits low, competitive or "
+            + "attractive for this brief, and whether it is one of the suggested figures or your own. It asks "
+            + "once more only when something the suggestion read has changed, and a saved draft keeps its "
+            + "answer, so an unchanged draft is checked without a new call. The figures are an estimate from "
+            + "what the form says, never below the portal's minimum award — not a price the portal knows. "
+            + "One call per press; the button goes quiet until something it read has changed.",
+            Why: "The award is the only thing competing for freelancers' time against every other open "
+                 + "opportunity, and it is locked once you publish. Seeing where yours sits before that is "
+                 + "cheaper than an opportunity nobody enters."),
 
         new("opportunity.aiSpamScan",
             "Scans entries for empty repos, README-only work, and near-identical file layouts.",
@@ -3151,6 +3190,7 @@ public static class HelpRegistry
         "opportunity.aiCategory",
         "opportunity.aiRequirements",
         "opportunity.aiCriteria",
+        "opportunity.aiAward",
         "opportunity.aiSpamScan",
         "entry.aiDigest",
         "opportunity.progressNarrative",
